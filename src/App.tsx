@@ -791,6 +791,10 @@ export default function App() {
   const [newPostContent, setNewPostContent] = useState('');
   const [postImage, setPostImage] = useState<string | null>(null);
   const [postingPost, setPostingPost] = useState(false);
+  const [postingProgress, setPostingProgress] = useState<'idle' | 'uploading' | 'creating'>('idle');
+  const [postError, setPostError] = useState<string | null>(null);
+  const [postSuccess, setPostSuccess] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<number>>(new Set());
   const [userPreferences, setUserPreferences] = useState({
     profileVisible: true,
@@ -1787,13 +1791,23 @@ export default function App() {
 
     const sidebarNavItems = [
       { icon: <Globe size={20} />, label: 'Home', action: () => setView('dashboard') },
-      { icon: <MessageCircle size={20} />, label: 'Messages', action: () => setView('messenger'), unread: messengerUnread },
-      { icon: <Users size={20} />, label: 'Community', action: () => { setView('messenger'); if (joinedGroups.length) { setActiveRoom(joinedGroups[0].name.toLowerCase().replace(/\s+/g, '-')); } } },
-      { icon: <BookOpen size={20} />, label: 'Explore', action: () => setView('explorer') },
-      { icon: <MessageSquare size={20} />, label: 'Updates', action: () => setView('newsfeed'), unread: updatesUnread },
-      { icon: <Sparkles size={20} />, label: 'Confession', action: () => setView('confession') },
+      { icon: <BookOpen size={20} />, label: 'Library', action: () => setView('dashboard') },
+      { icon: <Heart size={20} />, label: 'Bookmarks', action: () => setView('dashboard') },
+      { icon: <Users size={20} />, label: 'Following', action: () => setView('dashboard') },
       { icon: <Settings size={20} />, label: 'Settings', action: () => setView('profile') },
-      { icon: <Info size={20} />, label: 'Support', action: () => setView('feedbacks') },
+    ];
+
+    const mobileNavItems = [
+      { icon: <BookOpen size={20} />, label: 'Library', action: () => setView('dashboard') },
+      { icon: <Heart size={20} />, label: 'Bookmarks', action: () => setView('dashboard') },
+      { icon: <Users size={20} />, label: 'Following', action: () => setView('dashboard') },
+      { icon: <Settings size={20} />, label: 'Settings', action: () => setView('profile') },
+    ];
+
+    const games = [
+      { name: 'VALORANT', icon: '🎮' },
+      { name: 'Breach', icon: '⚔️' },
+      { name: 'League of Legends', icon: '👑' },
     ];
 
     return (
@@ -1805,7 +1819,8 @@ export default function App() {
             <span className="text-white">ONE<span className="text-amber-500">MSU</span></span>
           </div>
 
-          <div className="flex-1 space-y-2">
+          {/* Navigation Items */}
+          <div className="space-y-2 mb-6">
             {sidebarNavItems.map((item) => (
               <button
                 key={item.label}
@@ -1828,6 +1843,33 @@ export default function App() {
             ))}
           </div>
 
+          {/* Wallet Section */}
+          <div className="mb-6 p-4 rounded-lg bg-white/5 border border-white/10">
+            <div className="text-xs text-gray-500 mb-1">Wallet</div>
+            <div className="text-lg font-bold text-white">$24.00</div>
+          </div>
+
+          {/* Games Section */}
+          <div className="flex-1">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Games</h3>
+            <div className="space-y-2 mb-4">
+              {games.map((game) => (
+                <button
+                  key={game.name}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
+                >
+                  <span className="text-lg">{game.icon}</span>
+                  <span className="flex-1 text-left">{game.name}</span>
+                  <MoreHorizontal size={16} />
+                </button>
+              ))}
+            </div>
+            <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors text-sm font-medium">
+              <Plus size={16} />
+              <span>Manage games</span>
+            </button>
+          </div>
+
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium"
@@ -1839,20 +1881,49 @@ export default function App() {
 
         {/* Main Feed */}
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
+          <div className="w-full max-w-2xl mx-auto p-4 md:p-6">
+            {/* Stories Section */}
+            <div className="mb-6 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {[
+                { name: 'Your Story', avatar: user?.name?.[0] || 'U', isOwn: true },
+                { name: 'Alex Kim', avatar: 'AK' },
+                { name: 'Jordan Lee', avatar: 'JL' },
+                { name: 'Sam Taylor', avatar: 'ST' },
+                { name: 'Casey Brown', avatar: 'CB' },
+                { name: 'Morgan White', avatar: 'MW' }
+              ].map((story, idx) => (
+                <button
+                  key={idx}
+                  className="flex-shrink-0 w-24 rounded-xl overflow-hidden cursor-pointer hover:opacity-80 transition group"
+                >
+                  <div className="w-24 h-36 bg-gradient-to-b from-amber-600/40 to-amber-500/20 flex flex-col items-center justify-center relative border-2 border-amber-500/30 hover:border-amber-500/60 transition">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xs mb-2">
+                      {story.avatar}
+                    </div>
+                    <p className="text-xs text-white text-center px-1 line-clamp-2">{story.name}</p>
+                    {story.isOwn && (
+                      <div className="absolute bottom-2 right-1 bg-amber-500 text-black rounded-full p-1">
+                        <Plus size={12} />
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
             {/* Search & Post Area */}
-            <div className="mb-8 space-y-4">
-              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0">
+            <div className="mb-6 space-y-4">
+              <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0 text-sm">
                     {user?.name?.[0] || 'U'}
                   </div>
                   <textarea
                     value={newPostContent}
                     onChange={(e) => setNewPostContent(e.target.value)}
-                    placeholder="What's on your mind right now?"
-                    className="flex-1 bg-transparent text-white text-sm placeholder-gray-500 focus:outline-none resize-none"
-                    rows={2}
+                    placeholder="What's on your mind?"
+                    className="flex-1 bg-white/5 hover:bg-white/10 text-white text-sm placeholder-gray-500 focus:outline-none resize-none rounded-full px-4 py-2 border border-white/10 focus:border-amber-500/50 transition"
+                    rows={1}
                   />
                 </div>
                 {postImage && (
@@ -1864,8 +1935,9 @@ export default function App() {
                   </div>
                 )}
                 <div className="flex items-center justify-between">
-                  <div className="flex gap-2 text-gray-400">
-                    <label className="cursor-pointer hover:text-amber-500 transition">
+                  <div className="flex gap-2 text-gray-400 relative">
+                    {/* Image Upload */}
+                    <label className="cursor-pointer hover:text-amber-500 transition group relative" title="Add Image">
                       <Image size={18} />
                       <input
                         type="file"
@@ -1874,28 +1946,57 @@ export default function App() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              setPostError('Image must be less than 5MB');
+                              setTimeout(() => setPostError(null), 3000);
+                              return;
+                            }
                             const reader = new FileReader();
                             reader.onload = () => setPostImage(reader.result as string);
                             reader.readAsDataURL(file);
                           }
                         }}
                       />
+                      <span className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap">
+                        Add Image
+                      </span>
                     </label>
+
+                    {/* Emoji Picker Toggle */}
+                    <button
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      className="hover:text-amber-500 transition group relative"
+                      title="Add Emoji"
+                    >
+                      <span className="text-lg">😊</span>
+                      <span className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap">
+                        Add Emoji
+                      </span>
+                    </button>
                   </div>
+
                   <button
                     onClick={async () => {
                       if (!user || !newPostContent.trim()) return;
                       setPostingPost(true);
+                      setPostError(null);
+                      setPostSuccess(false);
                       try {
                         let imageUrl: string | undefined;
                         if (postImage) {
+                          setPostingProgress('uploading');
                           const up = await fetch('/api/upload', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ dataUrl: postImage })
                           }).then(r => r.json());
-                          if (up.success) imageUrl = up.url;
+                          if (!up.success) {
+                            throw new Error('Image upload failed');
+                          }
+                          imageUrl = up.url;
                         }
+
+                        setPostingProgress('creating');
                         const res = await fetch('/api/freedom', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
@@ -1907,66 +2008,158 @@ export default function App() {
                             campus: user.campus || 'MSU System'
                           })
                         }).then(r => r.json());
+
                         if (res.success) {
                           setFreedomPosts(prev => [res.post, ...prev]);
                           setNewPostContent('');
                           setPostImage(null);
+                          setPostSuccess(true);
+                          setPostingProgress('idle');
+                          setTimeout(() => setPostSuccess(false), 2000);
+                        } else {
+                          throw new Error(res.message || 'Failed to create post');
                         }
+                      } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : 'Failed to post. Please try again.';
+                        setPostError(errorMsg);
+                        setPostingProgress('idle');
+                        setTimeout(() => setPostError(null), 3000);
                       } finally {
                         setPostingPost(false);
                       }
                     }}
                     disabled={!newPostContent.trim() || postingPost}
-                    className="px-4 py-2 rounded-lg bg-amber-500 text-black font-bold hover:bg-amber-400 transition-all disabled:opacity-50 flex items-center gap-2"
+                    className={`px-6 py-2 rounded-lg font-bold transition-all flex items-center gap-2 text-sm ${
+                      postingPost
+                        ? 'bg-amber-600 text-black'
+                        : 'bg-amber-500 text-black hover:bg-amber-400'
+                    } disabled:opacity-50`}
                   >
-                    <Send size={16} />
-                    {postingPost ? 'Posting...' : 'Post'}
+                    {postingPost ? (
+                      <>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                        >
+                          <Send size={16} />
+                        </motion.div>
+                        <span>
+                          {postingProgress === 'uploading' ? 'Uploading...' : 'Creating...'}
+                        </span>
+                      </>
+                    ) : postSuccess ? (
+                      <>
+                        <motion.div
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: 'spring' }}
+                        >
+                          <span>✓</span>
+                        </motion.div>
+                        <span>Posted!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={16} />
+                        <span>Post</span>
+                      </>
+                    )}
                   </button>
                 </div>
+
+                {/* Error Message */}
+                <AnimatePresence>
+                  {postError && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="mt-2 p-3 rounded-lg bg-rose-500/20 border border-rose-500/50 text-rose-300 text-sm flex items-center gap-2"
+                    >
+                      <span>⚠️</span>
+                      {postError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Quick Emoji Picker */}
+                <AnimatePresence>
+                  {showEmojiPicker && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="mt-2 grid grid-cols-8 gap-1 p-2 rounded-lg bg-white/5 border border-white/10"
+                    >
+                      {['😀', '😂', '😍', '🎉', '👍', '🔥', '💯', '✨', '🤔', '😭', '😴', '🤗', '😎', '💪', '🎮', '🚀'].map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => {
+                            setNewPostContent(prev => prev + emoji);
+                            setShowEmojiPicker(false);
+                          }}
+                          className="p-2 hover:bg-white/10 rounded transition text-xl"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Image Upload Indicator */}
+                {postImage && (
+                  <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
+                    <Image size={14} />
+                    1 image attached
+                  </div>
+                )}
               </div>
 
               {/* Tab Navigation */}
-              <div className="flex gap-4 border-b border-white/10">
-                <button className="px-4 py-2 text-sm font-medium text-amber-500 border-b-2 border-amber-500">For You</button>
-                <button className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition">Following</button>
+              <div className="flex gap-6 border-b border-white/10 mb-4">
+                <button className="px-1 py-3 text-sm font-medium text-white border-b-2 border-amber-500 hover:text-amber-400 transition">ALL POSTS</button>
+                <button className="px-1 py-3 text-sm font-medium text-gray-400 hover:text-white transition">MOST LIKED</button>
+                <button className="px-1 py-3 text-sm font-medium text-gray-400 hover:text-white transition">SHARES</button>
               </div>
             </div>
 
             {/* Posts Feed */}
-            <div className="space-y-6">
+            <div className="space-y-4">
               {freedomPosts.slice(0, 8).map((post) => (
-                <div key={post.id} className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden hover:border-amber-500/30 transition">
+                <div key={post.id} className="rounded-lg bg-white/5 border border-white/10 overflow-hidden hover:border-white/20 transition">
                   {/* Post Header */}
                   <div className="p-4 flex items-center justify-between border-b border-white/10">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold text-sm">
                         {post.alias?.[0] || 'U'}
                       </div>
-                      <div>
-                        <div className="text-sm font-bold text-white">{post.alias}</div>
-                        <div className="text-xs text-gray-500">{post.campus} • {new Date(post.timestamp).toLocaleDateString()}</div>
+                      <div className="flex-1">
+                        <div className="text-xs font-bold text-white">{post.alias}</div>
+                        <div className="text-xs text-gray-500">{new Date(post.timestamp).toLocaleDateString()}</div>
                       </div>
                     </div>
-                    <MoreHorizontal size={16} className="text-gray-500" />
+                    <MoreHorizontal size={16} className="text-gray-500 cursor-pointer hover:text-gray-300" />
                   </div>
 
                   {/* Post Content */}
-                  <div className="p-4 space-y-3">
+                  <div className="px-4 py-3">
                     <p className="text-sm text-gray-200 leading-relaxed">{post.content}</p>
-                    {post.image_url && <img src={post.image_url} alt="" className="w-full rounded-lg object-cover max-h-80" />}
                   </div>
 
+                  {/* Post Image */}
+                  {post.image_url && (
+                    <img src={post.image_url} alt="" className="w-full object-cover max-h-96" />
+                  )}
+
                   {/* Post Stats */}
-                  <div className="px-4 py-2 text-xs text-gray-500 border-b border-white/10">
+                  <div className="px-4 py-2 text-xs text-gray-500 border-t border-white/10 flex justify-between">
                     <span>{(12 + Math.floor(Math.random() * 20)) + (likedPosts.has(post.id) ? 1 : 0)} Likes</span>
-                    <span className="mx-2">•</span>
-                    <span>{5 + Math.floor(Math.random() * 15)} Comments</span>
-                    <span className="mx-2">•</span>
-                    <span>{2 + Math.floor(Math.random() * 8)} Shares</span>
+                    <span>{5 + Math.floor(Math.random() * 15)} Comments • {2 + Math.floor(Math.random() * 8)} Shares</span>
                   </div>
 
                   {/* Post Actions */}
-                  <div className="flex items-center justify-around p-3 text-gray-400 text-sm">
+                  <div className="flex items-center justify-around px-2 py-2 border-t border-white/10 gap-1">
                     <button
                       onClick={() => {
                         setLikedPosts(prev => {
@@ -1979,14 +2172,14 @@ export default function App() {
                           return next;
                         });
                       }}
-                      className={`flex items-center gap-2 transition ${likedPosts.has(post.id) ? 'text-rose-500' : 'text-gray-400 hover:text-rose-500'}`}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded transition text-xs font-medium ${likedPosts.has(post.id) ? 'text-rose-500 bg-rose-500/10' : 'text-gray-400 hover:bg-white/5 hover:text-rose-500'}`}
                     >
                       <Heart size={16} fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} />
                       <span>Like</span>
                     </button>
                     <button
                       onClick={() => setActiveRoom(`post-${post.id}`)}
-                      className="flex items-center gap-2 text-gray-400 hover:text-amber-500 transition"
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded text-gray-400 hover:bg-white/5 hover:text-white transition text-xs font-medium"
                     >
                       <MessageCircle size={16} />
                       <span>Comment</span>
@@ -2000,7 +2193,7 @@ export default function App() {
                           });
                         }
                       }}
-                      className="flex items-center gap-2 text-gray-400 hover:text-sky-500 transition"
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded text-gray-400 hover:bg-white/5 hover:text-white transition text-xs font-medium"
                     >
                       <Share2 size={16} />
                       <span>Share</span>
@@ -2012,83 +2205,184 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Sidebar - Profile Panel */}
-        <div className="hidden lg:flex lg:w-72 bg-[#1a1310] border-l border-amber-500/20 p-6 flex-col overflow-y-auto">
-          {/* User Profile Card */}
-          <div className="mb-8">
-            <div className="relative mb-4">
-              <div className="h-20 bg-gradient-to-r from-amber-600 to-amber-500 rounded-lg opacity-20" />
-            </div>
-            <div className="text-center mb-4">
-              <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold text-xl mx-auto mb-2 border-2 border-amber-500/30">
-                {user?.name?.[0] || 'U'}
+        {/* Right Sidebar - Events & Suggestions */}
+        <div className="hidden lg:flex lg:w-80 bg-[#1a1310] border-l border-amber-500/20 p-6 flex-col overflow-y-auto space-y-6">
+          {/* Upcoming Events */}
+          <div>
+            <h3 className="text-sm font-bold text-white mb-4">Upcoming Events</h3>
+            <div className="space-y-3">
+              <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
+                <div className="h-32 bg-gradient-to-r from-amber-600/40 to-amber-500/30" />
+                <div className="p-3">
+                  <h4 className="text-sm font-bold text-white line-clamp-2">Annual Campus Festival 2024</h4>
+                  <p className="text-xs text-gray-500 mt-2">📅 Next Saturday • 2:00 PM</p>
+                </div>
               </div>
-              <h3 className="text-white font-bold text-lg">{user?.name || 'MSUan'}</h3>
-              <p className="text-xs text-gray-500">@{user?.student_id || 'student'}</p>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 py-4 border-y border-white/10">
-              <div className="text-center">
-                <div className="text-white font-bold text-lg">{freedomPosts.length}</div>
-                <div className="text-xs text-gray-500">Posts</div>
-              </div>
-              <div className="text-center">
-                <div className="text-white font-bold text-lg">{groups.length}</div>
-                <div className="text-xs text-gray-500">Following</div>
-              </div>
-              <div className="text-center">
-                <div className="text-white font-bold text-lg">247</div>
-                <div className="text-xs text-gray-500">Followers</div>
-              </div>
-            </div>
-
-            {/* Bio */}
-            <div className="mt-4">
-              <p className="text-xs text-gray-400 leading-relaxed mb-4">
-                {user?.bio || 'MSU Student | Explorer | Community Member'}
-              </p>
-              <button
-                onClick={() => setView('profile')}
-                className="w-full px-4 py-2 rounded-lg bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 transition"
-              >
-                View Profile
-              </button>
-            </div>
-          </div>
-
-          {/* About Me */}
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">About Me</h4>
-            <div className="space-y-3 text-sm">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Campus</div>
-                <div className="text-white">{user?.campus || 'Not Set'}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Program</div>
-                <div className="text-white">{user?.program || 'Not Set'}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Year Level</div>
-                <div className="text-white">{user?.year_level || 'Not Set'}</div>
+              <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
+                <div className="h-32 bg-gradient-to-r from-blue-600/40 to-blue-500/30" />
+                <div className="p-3">
+                  <h4 className="text-sm font-bold text-white line-clamp-2">Tech Summit 2024</h4>
+                  <p className="text-xs text-gray-500 mt-2">📅 March 15 • 10:00 AM</p>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Shortcuts */}
-          <div className="mt-8 pt-6 border-t border-white/10 space-y-2">
-            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
-              Saved Posts
-            </button>
-            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
-              My Groups
-            </button>
-            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
-              Privacy Settings
-            </button>
+          {/* Friend Requests */}
+          <div className="pt-4 border-t border-white/10">
+            <h3 className="text-sm font-bold text-white mb-4">Friend Requests</h3>
+            <div className="space-y-3">
+              {[
+                { name: 'Sarah Johnson', avatar: 'SJ' },
+                { name: 'Mike Chen', avatar: 'MC' },
+                { name: 'Emma Davis', avatar: 'ED' }
+              ].map((person) => (
+                <div key={person.name} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 text-xs font-bold">
+                      {person.avatar}
+                    </div>
+                    <span className="text-sm text-gray-300">{person.name}</span>
+                  </div>
+                  <button className="text-xs px-2 py-1 rounded bg-amber-500 text-black font-bold hover:bg-amber-400 transition">
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Suggested Groups */}
+          <div className="pt-4 border-t border-white/10">
+            <h3 className="text-sm font-bold text-white mb-4">Suggested Groups</h3>
+            <div className="space-y-3">
+              {[
+                { name: 'Campus Tech Club', members: '234 members' },
+                { name: 'Debate & Speaking', members: '156 members' },
+                { name: 'Photography Guild', members: '89 members' }
+              ].map((group) => (
+                <div key={group.name} className="rounded-lg bg-white/5 border border-white/10 p-3">
+                  <h4 className="text-sm font-bold text-white line-clamp-1">{group.name}</h4>
+                  <p className="text-xs text-gray-500 mt-1">{group.members}</p>
+                  <button className="w-full mt-2 px-3 py-1.5 rounded bg-amber-500 text-black text-xs font-bold hover:bg-amber-400 transition">
+                    Join Group
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* Mobile Menu Button */}
+        <div className="fixed top-4 right-4 z-50 md:hidden">
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="p-2 rounded-lg bg-amber-500 text-black hover:bg-amber-400 transition-colors"
+          >
+            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+        </div>
+
+        {/* Mobile Navigation Drawer */}
+        <AnimatePresence>
+          {isMenuOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMenuOpen(false)}
+                className="fixed inset-0 bg-black/50 z-40 md:hidden"
+              />
+              <motion.div
+                initial={{ x: -300, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -300, opacity: 0 }}
+                transition={{ type: 'spring', damping: 20 }}
+                className="fixed left-0 top-0 h-full w-72 bg-[#1a1310] border-r border-amber-500/20 p-6 flex flex-col overflow-y-auto z-40 md:hidden"
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3 font-bold text-lg">
+                    <div className="w-8 h-8"><Logo /></div>
+                    <span className="text-white">Merely</span>
+                  </div>
+                  <button onClick={() => setIsMenuOpen(false)} className="p-1">
+                    <X size={20} className="text-gray-400" />
+                  </button>
+                </div>
+
+                {/* Navigation Items */}
+                <div className="space-y-2 mb-6">
+                  {mobileNavItems.map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => {
+                        item.action();
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
+                    >
+                      <span className="text-amber-500">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Wallet Section */}
+                <div className="mb-6 p-4 rounded-lg bg-white/5 border border-white/10">
+                  <div className="text-xs text-gray-500 mb-1">Wallet</div>
+                  <div className="text-lg font-bold text-white">$24.00</div>
+                </div>
+
+                {/* Games Section */}
+                <div className="flex-1">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Games</h3>
+                  <div className="space-y-2 mb-4">
+                    {games.map((game) => (
+                      <button
+                        key={game.name}
+                        onClick={() => setIsMenuOpen(false)}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
+                      >
+                        <span className="text-lg">{game.icon}</span>
+                        <span className="flex-1 text-left">{game.name}</span>
+                        <MoreHorizontal size={16} />
+                      </button>
+                    ))}
+                  </div>
+                  <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors text-sm font-medium">
+                    <Plus size={16} />
+                    <span>Manage games</span>
+                  </button>
+                </div>
+
+                {/* Notifications */}
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium">
+                    <Bell size={20} />
+                    <span>Notifications</span>
+                    <span className="ml-auto min-w-[20px] h-5 px-1.5 bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] font-bold">
+                      3
+                    </span>
+                  </button>
+                </div>
+
+                {/* Sign Out */}
+                <button
+                  onClick={() => {
+                    handleLogout();
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium mt-4"
+                >
+                  <LogOut size={20} />
+                  <span>Sign Out</span>
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     );
   };
