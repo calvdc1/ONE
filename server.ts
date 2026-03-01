@@ -115,7 +115,20 @@ try {
     location TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-`);
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    type TEXT,
+    title TEXT,
+    content TEXT,
+    link TEXT,
+    is_read INTEGER DEFAULT 0,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_user_timestamp ON notifications(user_id, timestamp DESC);
+  `);
 } catch (err: any) {
   if (err && err.code === "SQLITE_NOTADB") {
     db = new Database(":memory:");
@@ -200,6 +213,16 @@ try {
         schedule_time TEXT NOT NULL,
         location TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        type TEXT,
+        title TEXT,
+        content TEXT,
+        link TEXT,
+        is_read INTEGER DEFAULT 0,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
   } else {
@@ -604,6 +627,22 @@ async function startServer() {
     res.json({ success: true, last_read: row?.last_read ?? null });
   });
 
+  app.get("/api/notifications", (req, res) => {
+    const userId = Number(req.query.userId);
+    if (!userId) return res.status(400).json({ success: false });
+    const items = db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50").all(userId);
+    res.json(items);
+  });
+  app.post("/api/notifications/read", (req, res) => {
+    const { userId, notificationId } = req.body;
+    if (notificationId) {
+      db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?").run(notificationId, userId);
+    } else {
+      db.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?").run(userId);
+    }
+    res.json({ success: true });
+  });
+
   app.get("/api/users/search", (req, res) => {
     const query = req.query.q;
     const users = db.prepare("SELECT id, name, email, campus FROM users WHERE name LIKE ? OR email LIKE ? LIMIT 10").all(`%${query}%`, `%${query}%`);
@@ -624,13 +663,22 @@ async function startServer() {
 
   wss.on("connection", (ws) => {
     ws.on("message", (data) => {
-      const message = JSON.parse(data.toString());
+      let message;
+      try {
+        message = JSON.parse(data.toString());
+      } catch (e) {
+        return;
+      }
 
       if (message.type === "join") {
         clients.set(ws, { userId: message.userId, roomId: message.roomId });
         // Mark as online
         db.prepare("INSERT OR REPLACE INTO presence (user_id, last_seen) VALUES (?, CURRENT_TIMESTAMP)").run(message.userId);
-        broadcastToAll({ type: 'presence_update', userId: message.userId, status: 'online' });
+
+        // Send current online users back to joining user
+        const threshold = new Date(Date.now() - 60000).toISOString();
+        const online = db.prepare("SELECT user_id FROM presence WHERE last_seen > ?").all(threshold).map((u: any) => u.user_id);
+        broadcastToAll({ type: 'presence', onlineUsers: online });
       } else if (message.type === "chat") {
         const { senderId, senderName, content, roomId, mediaUrl, mediaType, clientId } = message;
         
@@ -654,6 +702,39 @@ async function startServer() {
           mediaType,
           timestamp: new Date().toISOString()
         });
+
+        // Handle Notifications for DM
+        if (roomId.startsWith('dm-')) {
+          const parts = roomId.split('-');
+          const a = Number(parts[1]);
+          const b = Number(parts[2]);
+          const recipientId = a === senderId ? b : a;
+
+          if (recipientId) {
+          // Insert notification record
+          const nInfo = db.prepare("INSERT INTO notifications (user_id, type, title, content, link) VALUES (?, ?, ?, ?, ?)").run(
+            recipientId,
+            'message',
+            `New message from ${senderName}`,
+            content ? (content.length > 50 ? content.substring(0, 47) + '...' : content) : 'Sent a file',
+            `#messenger?room=${roomId}`
+          );
+          const notification = db.prepare("SELECT * FROM notifications WHERE id = ?").get(nInfo.lastInsertRowid);
+
+          // Notify recipient if online
+          wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              const clientData = clients.get(client);
+              if (clientData && clientData.userId === recipientId) {
+                client.send(JSON.stringify({
+                  type: 'notification',
+                  notification
+                }));
+              }
+            }
+          });
+        }
+        }
 
         wss.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {

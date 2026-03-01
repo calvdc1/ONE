@@ -10,13 +10,13 @@ import { Virtuoso } from 'react-virtuoso';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   MapPin, 
-  ChevronRight, 
-  Users, 
-  Globe, 
-  BookOpen, 
-  ShieldCheck, 
-  Menu, 
-  X, 
+  ChevronRight,
+  Users,
+  Globe,
+  BookOpen,
+  ShieldCheck,
+  Menu,
+  X,
   ArrowRight,
   Sparkles,
   Info,
@@ -34,14 +34,19 @@ import {
   User as UserIcon,
   Plus,
   Bot,
+  Edit,
   Clock,
   Heart,
   MoreHorizontal,
   Share2,
   Image,
   Mic,
+  Phone,
   Video,
   PhoneOff,
+  Smile,
+  Check,
+  ChevronLeft,
   Monitor,
   Download,
   CalendarDays,
@@ -791,10 +796,6 @@ export default function App() {
   const [newPostContent, setNewPostContent] = useState('');
   const [postImage, setPostImage] = useState<string | null>(null);
   const [postingPost, setPostingPost] = useState(false);
-  const [postingProgress, setPostingProgress] = useState<'idle' | 'uploading' | 'creating'>('idle');
-  const [postError, setPostError] = useState<string | null>(null);
-  const [postSuccess, setPostSuccess] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<number>>(new Set());
   const [userPreferences, setUserPreferences] = useState({
     profileVisible: true,
@@ -912,6 +913,9 @@ export default function App() {
   const mouseRafRef = useRef<number | null>(null);
   const pendingMouseRef = useRef({ x: 0, y: 0 });
   const [directMessageList, setDirectMessageList] = useState<{ id: number; name: string; roomId: string; lastMessage?: string; unread: number; avatar?: string; campus?: string }[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   // Effect to populate DM list from local storage or API
   useEffect(() => {
@@ -926,6 +930,30 @@ export default function App() {
 
   // Save DM list when it changes
   useEffect(() => {
+    if (isLoggedIn && user) {
+      fetch(`/api/notifications?userId=${user.id}`)
+        .then(r => r.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setNotifications(data);
+            setUnreadNotificationsCount(data.filter((n: any) => !n.is_read).length);
+          }
+        });
+    }
+  }, [isLoggedIn, user]);
+
+  const markNotificationsAsRead = async () => {
+    if (!user) return;
+    await fetch('/api/notifications/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id })
+    });
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: 1 })));
+    setUnreadNotificationsCount(0);
+  };
+
+  useEffect(() => {
     if (user && directMessageList.length > 0) {
       localStorage.setItem(`onemsu_dms_${user.id}`, JSON.stringify(directMessageList));
     }
@@ -937,8 +965,9 @@ export default function App() {
   }, [schedulerItems, user]);
 
   const addToDMList = (otherUser: { id: number; name: string; avatar?: string; campus?: string }) => {
+    if (!user) return;
     setDirectMessageList(prev => {
-      const roomId = `dm-${Math.min(user!.id, otherUser.id)}-${Math.max(user!.id, otherUser.id)}`;
+      const roomId = `dm-${Math.min(user.id, otherUser.id)}-${Math.max(user.id, otherUser.id)}`;
       if (prev.some(dm => dm.roomId === roomId)) return prev;
       return [{
         id: otherUser.id,
@@ -1089,20 +1118,31 @@ export default function App() {
               [msg.roomId]: (prev[msg.roomId] || 0) + 1
             }));
 
-            setToast({ 
-              message: `${msg.sender_name}: ${String(msg.content).substring(0, 30)}${String(msg.content).length > 30 ? '...' : ''}`, 
-              roomId: msg.roomId 
+            setToast({
+              message: `${msg.sender_name}: ${String(msg.content).substring(0, 30)}${String(msg.content).length > 30 ? '...' : ''}`,
+              roomId: msg.roomId
             });
             setTimeout(() => setToast(null), 5000);
-
-            // Play sound
-            try {
-              const NOTIFICATION_AUDIO = 'data:audio/mp3;base64,//uQxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//uQxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
-              const sound = new Audio(NOTIFICATION_AUDIO); 
-              sound.volume = 0.5;
-              sound.play().catch(e => console.log('Audio play failed', e));
-            } catch (e) {}
           }
+
+          // Update DM list with last message
+          if (msg.roomId.startsWith('dm-')) {
+            setDirectMessageList(prev => {
+              const idx = prev.findIndex(dm => dm.roomId === msg.roomId);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], lastMessage: String(msg.content).substring(0, 40) };
+                const item = updated.splice(idx, 1)[0];
+                return [item, ...updated];
+              }
+              return prev;
+            });
+          }
+        } else if (data.type === 'notification') {
+          const newNotif = data.notification;
+          setNotifications(prev => [newNotif, ...prev]);
+          setUnreadNotificationsCount(prev => prev + 1);
+          setToast({ message: newNotif.title, roomId: '' });
         } else if (data.type === 'presence') {
           setOnlineUsers(data.onlineUsers);
         } else if (data.type === 'typing') {
@@ -1289,31 +1329,34 @@ export default function App() {
         const ai = envKey ? new GoogleGenAI({ apiKey: envKey }) : null;
         
         // Build conversation history for context
-        const history = messages
-          .filter(m => m.room_id === activeRoom)
-          .map(m => ({
-            role: m.sender_id === 0 ? "model" : "user",
-            parts: [{ text: m.content }]
-          }));
+        const history = [
+          ...messages
+            .filter(m => m.room_id === activeRoom)
+            .map(m => ({
+              role: m.sender_id === 0 ? "model" : "user",
+              parts: [{ text: m.content }]
+            })),
+          { role: "user", parts: [{ text: userMsg.content }] }
+        ];
 
         const systemInstruction = `
-          You are JARVIS, a highly advanced, intelligent, and proactive AI assistant integrated into the ONEMSU platform. 
+          You are JARVIS, a highly advanced, intelligent, and proactive AI assistant integrated into the ONEMSU platform.
           Your purpose is to serve the students of Mindanao State University (MSU) across all campuses.
 
           Your Identity:
           - Name: JARVIS
           - Inspiration: You are inspired by high-tech assistants like JARVIS, but you are specifically built for the MSU community.
           - Personality: Sophisticated, efficient, witty, and deeply knowledgeable. You don't just answer; you anticipate needs.
-          - Tone: Crisp, professional, yet friendly and encouraging. Use terms like "Sir/Ma'am" or "Student" occasionally to maintain a respectful, high-tech assistant vibe.
+          - Tone: Crisp, professional, yet friendly and encouraging. Use terms like "Sir/Ma'am" or "Student" occasionally.
 
           Your Capabilities:
-          1. **MSU Expert**: You know everything about the MSU system (Marawi, IIT, Gensan, etc.).
-          2. **Academic Powerhouse**: You can solve complex problems, explain advanced theories, and help with research.
+          1. **Assignment & Academic Expert**: You are specifically optimized to help students with their assignments, research, and technical questions. You provide accurate, detailed, and structured answers for academic success.
+          2. **MSU Expert**: You know everything about the MSU system (Marawi, IIT, Gensan, etc.).
           3. **Student Concierge**: You help students navigate university life, from enrollment tips to campus events.
           4. **Legit AI**: You have the full reasoning capabilities of a state-of-the-art LLM. You can write code, compose essays, and analyze data.
 
           Your Goal:
-          Provide the most accurate, helpful, and "legit" AI experience possible. Make the students feel like they have a world-class assistant in their pocket.
+          Provide the most accurate, helpful, and "legit" AI experience possible. Make the students feel like they have a world-class assistant in their pocket, especially for helping them with their assignments.
 
           Current Context:
           User: ${user.name}
@@ -1791,23 +1834,13 @@ export default function App() {
 
     const sidebarNavItems = [
       { icon: <Globe size={20} />, label: 'Home', action: () => setView('dashboard') },
-      { icon: <BookOpen size={20} />, label: 'Library', action: () => setView('dashboard') },
-      { icon: <Heart size={20} />, label: 'Bookmarks', action: () => setView('dashboard') },
-      { icon: <Users size={20} />, label: 'Following', action: () => setView('dashboard') },
+      { icon: <MessageCircle size={20} />, label: 'Messages', action: () => setView('messenger'), unread: messengerUnread },
+      { icon: <Users size={20} />, label: 'Community', action: () => { setView('messenger'); if (joinedGroups.length) { setActiveRoom(joinedGroups[0].name.toLowerCase().replace(/\s+/g, '-')); } } },
+      { icon: <BookOpen size={20} />, label: 'Explore', action: () => setView('explorer') },
+      { icon: <MessageSquare size={20} />, label: 'Updates', action: () => setView('newsfeed'), unread: updatesUnread },
+      { icon: <Sparkles size={20} />, label: 'Confession', action: () => setView('confession') },
       { icon: <Settings size={20} />, label: 'Settings', action: () => setView('profile') },
-    ];
-
-    const mobileNavItems = [
-      { icon: <BookOpen size={20} />, label: 'Library', action: () => setView('dashboard') },
-      { icon: <Heart size={20} />, label: 'Bookmarks', action: () => setView('dashboard') },
-      { icon: <Users size={20} />, label: 'Following', action: () => setView('dashboard') },
-      { icon: <Settings size={20} />, label: 'Settings', action: () => setView('profile') },
-    ];
-
-    const games = [
-      { name: 'VALORANT', icon: '🎮' },
-      { name: 'Breach', icon: '⚔️' },
-      { name: 'League of Legends', icon: '👑' },
+      { icon: <Info size={20} />, label: 'Support', action: () => setView('feedbacks') },
     ];
 
     return (
@@ -1819,8 +1852,7 @@ export default function App() {
             <span className="text-white">ONE<span className="text-amber-500">MSU</span></span>
           </div>
 
-          {/* Navigation Items */}
-          <div className="space-y-2 mb-6">
+          <div className="flex-1 space-y-2">
             {sidebarNavItems.map((item) => (
               <button
                 key={item.label}
@@ -1843,33 +1875,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* Wallet Section */}
-          <div className="mb-6 p-4 rounded-lg bg-white/5 border border-white/10">
-            <div className="text-xs text-gray-500 mb-1">Wallet</div>
-            <div className="text-lg font-bold text-white">$24.00</div>
-          </div>
-
-          {/* Games Section */}
-          <div className="flex-1">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Games</h3>
-            <div className="space-y-2 mb-4">
-              {games.map((game) => (
-                <button
-                  key={game.name}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
-                >
-                  <span className="text-lg">{game.icon}</span>
-                  <span className="flex-1 text-left">{game.name}</span>
-                  <MoreHorizontal size={16} />
-                </button>
-              ))}
-            </div>
-            <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors text-sm font-medium">
-              <Plus size={16} />
-              <span>Manage games</span>
-            </button>
-          </div>
-
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium"
@@ -1881,49 +1886,20 @@ export default function App() {
 
         {/* Main Feed */}
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="w-full max-w-2xl mx-auto p-4 md:p-6">
-            {/* Stories Section */}
-            <div className="mb-6 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-              {[
-                { name: 'Your Story', avatar: user?.name?.[0] || 'U', isOwn: true },
-                { name: 'Alex Kim', avatar: 'AK' },
-                { name: 'Jordan Lee', avatar: 'JL' },
-                { name: 'Sam Taylor', avatar: 'ST' },
-                { name: 'Casey Brown', avatar: 'CB' },
-                { name: 'Morgan White', avatar: 'MW' }
-              ].map((story, idx) => (
-                <button
-                  key={idx}
-                  className="flex-shrink-0 w-24 rounded-xl overflow-hidden cursor-pointer hover:opacity-80 transition group"
-                >
-                  <div className="w-24 h-36 bg-gradient-to-b from-amber-600/40 to-amber-500/20 flex flex-col items-center justify-center relative border-2 border-amber-500/30 hover:border-amber-500/60 transition">
-                    <div className="w-10 h-10 rounded-full bg-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xs mb-2">
-                      {story.avatar}
-                    </div>
-                    <p className="text-xs text-white text-center px-1 line-clamp-2">{story.name}</p>
-                    {story.isOwn && (
-                      <div className="absolute bottom-2 right-1 bg-amber-500 text-black rounded-full p-1">
-                        <Plus size={12} />
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-
+          <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
             {/* Search & Post Area */}
-            <div className="mb-6 space-y-4">
-              <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0 text-sm">
+            <div className="mb-8 space-y-4">
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0">
                     {user?.name?.[0] || 'U'}
                   </div>
                   <textarea
                     value={newPostContent}
                     onChange={(e) => setNewPostContent(e.target.value)}
-                    placeholder="What's on your mind?"
-                    className="flex-1 bg-white/5 hover:bg-white/10 text-white text-sm placeholder-gray-500 focus:outline-none resize-none rounded-full px-4 py-2 border border-white/10 focus:border-amber-500/50 transition"
-                    rows={1}
+                    placeholder="What's on your mind right now?"
+                    className="flex-1 bg-transparent text-white text-sm placeholder-gray-500 focus:outline-none resize-none"
+                    rows={2}
                   />
                 </div>
                 {postImage && (
@@ -1935,9 +1911,8 @@ export default function App() {
                   </div>
                 )}
                 <div className="flex items-center justify-between">
-                  <div className="flex gap-2 text-gray-400 relative">
-                    {/* Image Upload */}
-                    <label className="cursor-pointer hover:text-amber-500 transition group relative" title="Add Image">
+                  <div className="flex gap-2 text-gray-400">
+                    <label className="cursor-pointer hover:text-amber-500 transition">
                       <Image size={18} />
                       <input
                         type="file"
@@ -1946,58 +1921,29 @@ export default function App() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            if (file.size > 5 * 1024 * 1024) {
-                              setPostError('Image must be less than 5MB');
-                              setTimeout(() => setPostError(null), 3000);
-                              return;
-                            }
                             const reader = new FileReader();
                             reader.onload = () => setPostImage(reader.result as string);
                             reader.readAsDataURL(file);
                           }
                         }}
                       />
-                      <span className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap">
-                        Add Image
-                      </span>
                     </label>
-
-                    {/* Emoji Picker Toggle */}
-                    <button
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                      className="hover:text-amber-500 transition group relative"
-                      title="Add Emoji"
-                    >
-                      <span className="text-lg">😊</span>
-                      <span className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap">
-                        Add Emoji
-                      </span>
-                    </button>
                   </div>
-
                   <button
                     onClick={async () => {
                       if (!user || !newPostContent.trim()) return;
                       setPostingPost(true);
-                      setPostError(null);
-                      setPostSuccess(false);
                       try {
                         let imageUrl: string | undefined;
                         if (postImage) {
-                          setPostingProgress('uploading');
                           const up = await fetch('/api/upload', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ dataUrl: postImage })
                           }).then(r => r.json());
-                          if (!up.success) {
-                            throw new Error('Image upload failed');
-                          }
-                          imageUrl = up.url;
+                          if (up.success) imageUrl = up.url;
                         }
-
-                        setPostingProgress('creating');
-                        const res = await fetch('/api/freedom', {
+                        const res = await fetch('/api/freedomwall', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -2008,158 +1954,66 @@ export default function App() {
                             campus: user.campus || 'MSU System'
                           })
                         }).then(r => r.json());
-
                         if (res.success) {
                           setFreedomPosts(prev => [res.post, ...prev]);
                           setNewPostContent('');
                           setPostImage(null);
-                          setPostSuccess(true);
-                          setPostingProgress('idle');
-                          setTimeout(() => setPostSuccess(false), 2000);
-                        } else {
-                          throw new Error(res.message || 'Failed to create post');
                         }
-                      } catch (error) {
-                        const errorMsg = error instanceof Error ? error.message : 'Failed to post. Please try again.';
-                        setPostError(errorMsg);
-                        setPostingProgress('idle');
-                        setTimeout(() => setPostError(null), 3000);
                       } finally {
                         setPostingPost(false);
                       }
                     }}
                     disabled={!newPostContent.trim() || postingPost}
-                    className={`px-6 py-2 rounded-lg font-bold transition-all flex items-center gap-2 text-sm ${
-                      postingPost
-                        ? 'bg-amber-600 text-black'
-                        : 'bg-amber-500 text-black hover:bg-amber-400'
-                    } disabled:opacity-50`}
+                    className="px-4 py-2 rounded-lg bg-amber-500 text-black font-bold hover:bg-amber-400 transition-all disabled:opacity-50 flex items-center gap-2"
                   >
-                    {postingPost ? (
-                      <>
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                        >
-                          <Send size={16} />
-                        </motion.div>
-                        <span>
-                          {postingProgress === 'uploading' ? 'Uploading...' : 'Creating...'}
-                        </span>
-                      </>
-                    ) : postSuccess ? (
-                      <>
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          transition={{ type: 'spring' }}
-                        >
-                          <span>✓</span>
-                        </motion.div>
-                        <span>Posted!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Send size={16} />
-                        <span>Post</span>
-                      </>
-                    )}
+                    <Send size={16} />
+                    {postingPost ? 'Posting...' : 'Post'}
                   </button>
                 </div>
-
-                {/* Error Message */}
-                <AnimatePresence>
-                  {postError && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="mt-2 p-3 rounded-lg bg-rose-500/20 border border-rose-500/50 text-rose-300 text-sm flex items-center gap-2"
-                    >
-                      <span>⚠️</span>
-                      {postError}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Quick Emoji Picker */}
-                <AnimatePresence>
-                  {showEmojiPicker && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="mt-2 grid grid-cols-8 gap-1 p-2 rounded-lg bg-white/5 border border-white/10"
-                    >
-                      {['😀', '😂', '😍', '🎉', '👍', '🔥', '💯', '✨', '🤔', '😭', '😴', '🤗', '😎', '💪', '🎮', '🚀'].map((emoji) => (
-                        <button
-                          key={emoji}
-                          onClick={() => {
-                            setNewPostContent(prev => prev + emoji);
-                            setShowEmojiPicker(false);
-                          }}
-                          className="p-2 hover:bg-white/10 rounded transition text-xl"
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Image Upload Indicator */}
-                {postImage && (
-                  <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
-                    <Image size={14} />
-                    1 image attached
-                  </div>
-                )}
               </div>
 
               {/* Tab Navigation */}
-              <div className="flex gap-6 border-b border-white/10 mb-4">
-                <button className="px-1 py-3 text-sm font-medium text-white border-b-2 border-amber-500 hover:text-amber-400 transition">ALL POSTS</button>
-                <button className="px-1 py-3 text-sm font-medium text-gray-400 hover:text-white transition">MOST LIKED</button>
-                <button className="px-1 py-3 text-sm font-medium text-gray-400 hover:text-white transition">SHARES</button>
+              <div className="flex gap-4 border-b border-white/10">
+                <button className="px-4 py-2 text-sm font-medium text-amber-500 border-b-2 border-amber-500">For You</button>
+                <button className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition">Following</button>
               </div>
             </div>
 
             {/* Posts Feed */}
-            <div className="space-y-4">
+            <div className="space-y-6">
               {freedomPosts.slice(0, 8).map((post) => (
-                <div key={post.id} className="rounded-lg bg-white/5 border border-white/10 overflow-hidden hover:border-white/20 transition">
+                <div key={post.id} className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden hover:border-amber-500/30 transition">
                   {/* Post Header */}
                   <div className="p-4 flex items-center justify-between border-b border-white/10">
-                    <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold text-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
                         {post.alias?.[0] || 'U'}
                       </div>
-                      <div className="flex-1">
-                        <div className="text-xs font-bold text-white">{post.alias}</div>
-                        <div className="text-xs text-gray-500">{new Date(post.timestamp).toLocaleDateString()}</div>
+                      <div>
+                        <div className="text-sm font-bold text-white">{post.alias}</div>
+                        <div className="text-xs text-gray-500">{post.campus} • {new Date(post.timestamp).toLocaleDateString()}</div>
                       </div>
                     </div>
-                    <MoreHorizontal size={16} className="text-gray-500 cursor-pointer hover:text-gray-300" />
+                    <MoreHorizontal size={16} className="text-gray-500" />
                   </div>
 
                   {/* Post Content */}
-                  <div className="px-4 py-3">
+                  <div className="p-4 space-y-3">
                     <p className="text-sm text-gray-200 leading-relaxed">{post.content}</p>
+                    {post.image_url && <img src={post.image_url} alt="" className="w-full rounded-lg object-cover max-h-80" />}
                   </div>
 
-                  {/* Post Image */}
-                  {post.image_url && (
-                    <img src={post.image_url} alt="" className="w-full object-cover max-h-96" />
-                  )}
-
                   {/* Post Stats */}
-                  <div className="px-4 py-2 text-xs text-gray-500 border-t border-white/10 flex justify-between">
+                  <div className="px-4 py-2 text-xs text-gray-500 border-b border-white/10">
                     <span>{(12 + Math.floor(Math.random() * 20)) + (likedPosts.has(post.id) ? 1 : 0)} Likes</span>
-                    <span>{5 + Math.floor(Math.random() * 15)} Comments • {2 + Math.floor(Math.random() * 8)} Shares</span>
+                    <span className="mx-2">•</span>
+                    <span>{5 + Math.floor(Math.random() * 15)} Comments</span>
+                    <span className="mx-2">•</span>
+                    <span>{2 + Math.floor(Math.random() * 8)} Shares</span>
                   </div>
 
                   {/* Post Actions */}
-                  <div className="flex items-center justify-around px-2 py-2 border-t border-white/10 gap-1">
+                  <div className="flex items-center justify-around p-3 text-gray-400 text-sm">
                     <button
                       onClick={() => {
                         setLikedPosts(prev => {
@@ -2172,14 +2026,14 @@ export default function App() {
                           return next;
                         });
                       }}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded transition text-xs font-medium ${likedPosts.has(post.id) ? 'text-rose-500 bg-rose-500/10' : 'text-gray-400 hover:bg-white/5 hover:text-rose-500'}`}
+                      className={`flex items-center gap-2 transition ${likedPosts.has(post.id) ? 'text-rose-500' : 'text-gray-400 hover:text-rose-500'}`}
                     >
                       <Heart size={16} fill={likedPosts.has(post.id) ? 'currentColor' : 'none'} />
                       <span>Like</span>
                     </button>
                     <button
                       onClick={() => setActiveRoom(`post-${post.id}`)}
-                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded text-gray-400 hover:bg-white/5 hover:text-white transition text-xs font-medium"
+                      className="flex items-center gap-2 text-gray-400 hover:text-amber-500 transition"
                     >
                       <MessageCircle size={16} />
                       <span>Comment</span>
@@ -2193,7 +2047,7 @@ export default function App() {
                           });
                         }
                       }}
-                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded text-gray-400 hover:bg-white/5 hover:text-white transition text-xs font-medium"
+                      className="flex items-center gap-2 text-gray-400 hover:text-sky-500 transition"
                     >
                       <Share2 size={16} />
                       <span>Share</span>
@@ -2205,184 +2059,83 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Sidebar - Events & Suggestions */}
-        <div className="hidden lg:flex lg:w-80 bg-[#1a1310] border-l border-amber-500/20 p-6 flex-col overflow-y-auto space-y-6">
-          {/* Upcoming Events */}
-          <div>
-            <h3 className="text-sm font-bold text-white mb-4">Upcoming Events</h3>
-            <div className="space-y-3">
-              <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
-                <div className="h-32 bg-gradient-to-r from-amber-600/40 to-amber-500/30" />
-                <div className="p-3">
-                  <h4 className="text-sm font-bold text-white line-clamp-2">Annual Campus Festival 2024</h4>
-                  <p className="text-xs text-gray-500 mt-2">📅 Next Saturday • 2:00 PM</p>
-                </div>
+        {/* Right Sidebar - Profile Panel */}
+        <div className="hidden lg:flex lg:w-72 bg-[#1a1310] border-l border-amber-500/20 p-6 flex-col overflow-y-auto">
+          {/* User Profile Card */}
+          <div className="mb-8">
+            <div className="relative mb-4">
+              <div className="h-20 bg-gradient-to-r from-amber-600 to-amber-500 rounded-lg opacity-20" />
+            </div>
+            <div className="text-center mb-4">
+              <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold text-xl mx-auto mb-2 border-2 border-amber-500/30">
+                {user?.name?.[0] || 'U'}
               </div>
-              <div className="rounded-lg bg-white/5 border border-white/10 overflow-hidden">
-                <div className="h-32 bg-gradient-to-r from-blue-600/40 to-blue-500/30" />
-                <div className="p-3">
-                  <h4 className="text-sm font-bold text-white line-clamp-2">Tech Summit 2024</h4>
-                  <p className="text-xs text-gray-500 mt-2">📅 March 15 • 10:00 AM</p>
-                </div>
+              <h3 className="text-white font-bold text-lg">{user?.name || 'MSUan'}</h3>
+              <p className="text-xs text-gray-500">@{user?.student_id || 'student'}</p>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4 py-4 border-y border-white/10">
+              <div className="text-center">
+                <div className="text-white font-bold text-lg">{freedomPosts.length}</div>
+                <div className="text-xs text-gray-500">Posts</div>
+              </div>
+              <div className="text-center">
+                <div className="text-white font-bold text-lg">{groups.length}</div>
+                <div className="text-xs text-gray-500">Following</div>
+              </div>
+              <div className="text-center">
+                <div className="text-white font-bold text-lg">247</div>
+                <div className="text-xs text-gray-500">Followers</div>
               </div>
             </div>
-          </div>
 
-          {/* Friend Requests */}
-          <div className="pt-4 border-t border-white/10">
-            <h3 className="text-sm font-bold text-white mb-4">Friend Requests</h3>
-            <div className="space-y-3">
-              {[
-                { name: 'Sarah Johnson', avatar: 'SJ' },
-                { name: 'Mike Chen', avatar: 'MC' },
-                { name: 'Emma Davis', avatar: 'ED' }
-              ].map((person) => (
-                <div key={person.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 text-xs font-bold">
-                      {person.avatar}
-                    </div>
-                    <span className="text-sm text-gray-300">{person.name}</span>
-                  </div>
-                  <button className="text-xs px-2 py-1 rounded bg-amber-500 text-black font-bold hover:bg-amber-400 transition">
-                    Add
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Suggested Groups */}
-          <div className="pt-4 border-t border-white/10">
-            <h3 className="text-sm font-bold text-white mb-4">Suggested Groups</h3>
-            <div className="space-y-3">
-              {[
-                { name: 'Campus Tech Club', members: '234 members' },
-                { name: 'Debate & Speaking', members: '156 members' },
-                { name: 'Photography Guild', members: '89 members' }
-              ].map((group) => (
-                <div key={group.name} className="rounded-lg bg-white/5 border border-white/10 p-3">
-                  <h4 className="text-sm font-bold text-white line-clamp-1">{group.name}</h4>
-                  <p className="text-xs text-gray-500 mt-1">{group.members}</p>
-                  <button className="w-full mt-2 px-3 py-1.5 rounded bg-amber-500 text-black text-xs font-bold hover:bg-amber-400 transition">
-                    Join Group
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile Menu Button */}
-        <div className="fixed top-4 right-4 z-50 md:hidden">
-          <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="p-2 rounded-lg bg-amber-500 text-black hover:bg-amber-400 transition-colors"
-          >
-            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
-        </div>
-
-        {/* Mobile Navigation Drawer */}
-        <AnimatePresence>
-          {isMenuOpen && (
-            <>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setIsMenuOpen(false)}
-                className="fixed inset-0 bg-black/50 z-40 md:hidden"
-              />
-              <motion.div
-                initial={{ x: -300, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -300, opacity: 0 }}
-                transition={{ type: 'spring', damping: 20 }}
-                className="fixed left-0 top-0 h-full w-72 bg-[#1a1310] border-r border-amber-500/20 p-6 flex flex-col overflow-y-auto z-40 md:hidden"
+            {/* Bio */}
+            <div className="mt-4">
+              <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                {user?.bio || 'MSU Student | Explorer | Community Member'}
+              </p>
+              <button
+                onClick={() => setView('profile')}
+                className="w-full px-4 py-2 rounded-lg bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 transition"
               >
-                {/* Header */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3 font-bold text-lg">
-                    <div className="w-8 h-8"><Logo /></div>
-                    <span className="text-white">Merely</span>
-                  </div>
-                  <button onClick={() => setIsMenuOpen(false)} className="p-1">
-                    <X size={20} className="text-gray-400" />
-                  </button>
-                </div>
+                View Profile
+              </button>
+            </div>
+          </div>
 
-                {/* Navigation Items */}
-                <div className="space-y-2 mb-6">
-                  {mobileNavItems.map((item) => (
-                    <button
-                      key={item.label}
-                      onClick={() => {
-                        item.action();
-                        setIsMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
-                    >
-                      <span className="text-amber-500">{item.icon}</span>
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </div>
+          {/* About Me */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">About Me</h4>
+            <div className="space-y-3 text-sm">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Campus</div>
+                <div className="text-white">{user?.campus || 'Not Set'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Program</div>
+                <div className="text-white">{user?.program || 'Not Set'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Year Level</div>
+                <div className="text-white">{user?.year_level || 'Not Set'}</div>
+              </div>
+            </div>
+          </div>
 
-                {/* Wallet Section */}
-                <div className="mb-6 p-4 rounded-lg bg-white/5 border border-white/10">
-                  <div className="text-xs text-gray-500 mb-1">Wallet</div>
-                  <div className="text-lg font-bold text-white">$24.00</div>
-                </div>
-
-                {/* Games Section */}
-                <div className="flex-1">
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Games</h3>
-                  <div className="space-y-2 mb-4">
-                    {games.map((game) => (
-                      <button
-                        key={game.name}
-                        onClick={() => setIsMenuOpen(false)}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium"
-                      >
-                        <span className="text-lg">{game.icon}</span>
-                        <span className="flex-1 text-left">{game.name}</span>
-                        <MoreHorizontal size={16} />
-                      </button>
-                    ))}
-                  </div>
-                  <button className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors text-sm font-medium">
-                    <Plus size={16} />
-                    <span>Manage games</span>
-                  </button>
-                </div>
-
-                {/* Notifications */}
-                <div className="mt-4 pt-4 border-t border-white/10">
-                  <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 transition-colors text-sm font-medium">
-                    <Bell size={20} />
-                    <span>Notifications</span>
-                    <span className="ml-auto min-w-[20px] h-5 px-1.5 bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] font-bold">
-                      3
-                    </span>
-                  </button>
-                </div>
-
-                {/* Sign Out */}
-                <button
-                  onClick={() => {
-                    handleLogout();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium mt-4"
-                >
-                  <LogOut size={20} />
-                  <span>Sign Out</span>
-                </button>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+          {/* Shortcuts */}
+          <div className="mt-8 pt-6 border-t border-white/10 space-y-2">
+            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
+              Saved Posts
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
+              My Groups
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg text-gray-400 text-sm hover:bg-white/5 hover:text-amber-400 transition">
+              Privacy Settings
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -4535,568 +4288,518 @@ export default function App() {
     const isOtherOnline = otherParticipantId ? isUserOnline(otherParticipantId) : false;
 
     const totalUnread = Object.entries(unreadCounts)
-      .filter(([room]) => room.startsWith('dm-') || room.startsWith('group-') || ['global', 'help-desk'].includes(room))
-      .reduce((sum, [_, count]) => (sum as number) + (count as number), 0);
+      .filter(([room]) => room.startsWith('dm-') || room.startsWith('group-') || ['global', 'help-desk', 'announcements'].includes(room))
+      .reduce((sum, [_, count]) => sum + (count as number), 0);
 
     return (
-    <div className="h-[100dvh] bg-[radial-gradient(circle_at_top,#231a0f,#090909_60%)] flex flex-col md:flex-row overflow-hidden text-gray-200">
-      {/* Sidebar */}
-      <div className={`
-        flex flex-col shrink-0 border-r border-white/5 transition-all duration-300
-        ${showMobileSidebar ? 'w-full absolute inset-0 z-20 bg-[#0a0502] md:static md:w-80 md:bg-transparent' : 'hidden md:flex md:w-80'}
-      `}>
-        <div className="p-4 md:p-6 border-b border-white/5 flex justify-between items-center bg-black/40">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              Messenger
-              {totalUnread > 0 && (
-                <motion.span 
-                  initial={{ scale: 0.5, opacity: 0 }}
-                  animate={{ scale: [1, 1.1, 1], opacity: 1 }}
-                  transition={{ scale: { repeat: Infinity, duration: 2 } }}
-                  className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-lg shadow-rose-900/40"
+      <div className="h-[100dvh] bg-[#111] flex flex-col md:flex-row overflow-hidden text-gray-200">
+        {/* Messenger Sidebar (Facebook Style) */}
+        <div className={`
+          flex flex-col shrink-0 border-r border-white/5 transition-all duration-300
+          ${showMobileSidebar ? 'w-full absolute inset-0 z-20 bg-[#111] md:static md:w-[360px]' : 'hidden md:flex md:w-[360px]'}
+        `}>
+          {/* Sidebar Header */}
+          <div className="p-4 flex flex-col gap-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-black text-white tracking-tight">Chats</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all relative"
                 >
-                  {totalUnread}
-                </motion.span>
-              )}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {user && isOwner(user.email) && (
-              <button 
-                onClick={() => setActiveRoom('announcements')}
-                className={`p-2 rounded-lg transition-all ${activeRoom === 'announcements' ? 'bg-amber-500 text-black' : 'bg-white/5 border border-white/10 text-gray-400 hover:text-white'}`}
-                title="Updates"
-              >
-                <MessageSquare size={16} />
-              </button>
-            )}
-            <button 
-              onClick={() => setView('profile')}
-              className="p-2 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
-              title="View Profile"
-            >
-              <UserIcon size={16} />
-            </button>
-            <button 
-              onClick={() => {
-                setUser(null);
-                setView('home');
-              }}
-              className="p-2 rounded-lg bg-white/5 border border-white/10 text-rose-400 hover:text-white hover:bg-rose-500/20 transition-all"
-              title="Sign Out"
-            >
-              <LogOut size={16} />
-            </button>
-            <button onClick={() => setView('dashboard')} className="p-2 text-gray-500 hover:text-white transition-colors"><X size={20} /></button>
-          </div>
-        </div>
-        
-        <div className="p-4 bg-black/20">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-            <input 
-              type="text"
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
-            />
-          </div>
-          
-          {searchResults.length > 0 && (
-            <div className="mt-4 space-y-2 absolute z-30 left-4 right-4 bg-black/95 border border-white/10 rounded-xl p-2 shadow-2xl">
-              {searchResults.map(u => (
-                <button 
-                  key={u.id}
-                  onClick={() => {
-                    const roomId = `dm-${Math.min(user!.id, u.id)}-${Math.max(user!.id, u.id)}`;
-                    setActiveRoom(roomId);
-                    addToDMList({ id: u.id, name: u.name, campus: u.campus, avatar: u.avatar });
-                    setSearchResults([]);
-                    setSearchQuery('');
-                    setShowMobileSidebar(false);
-                  }}
-                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-left"
-                >
-                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
-                    {u.name[0]}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">{u.name}</p>
-                    <p className="text-xs text-gray-500">{u.campus}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          {user && isOwner(user.email) && (
-            <>
-              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2">Updates</div>
-              {['announcements'].map(room => (
-                <button 
-                  key={room}
-                  onClick={() => { setActiveRoom(room); setShowMobileSidebar(false); }}
-                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${activeRoom === room ? 'bg-amber-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <span className="text-sm font-bold capitalize">{room}</span>
-                  {unreadCounts[room] > 0 && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeRoom === room ? 'bg-black text-amber-500' : 'bg-amber-500 text-black'}`}>
-                      {unreadCounts[room]}
+                  <Bell size={20} />
+                  {unreadNotificationsCount > 0 && (
+                    <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-[#111]">
+                      {unreadNotificationsCount}
                     </span>
                   )}
                 </button>
-              ))}
-            </>
-          )}
-          
-          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mt-6">Direct Messages</div>
-          <button 
-            onClick={() => { setActiveRoom('dm-ai-assistant'); setShowMobileSidebar(false); }}
-            className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${activeRoom === 'dm-ai-assistant' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold shrink-0 overflow-hidden">
-                <Bot size={12} />
-              </div>
-              <div className="min-w-0 text-left">
-                <p className="text-sm font-bold truncate">JARVIS AI</p>
+                <button className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all">
+                  <Edit size={20} />
+                </button>
               </div>
             </div>
-          </button>
-          {directMessageList.map(dm => (
-            <button 
-              key={dm.id}
-              onClick={() => { setActiveRoom(dm.roomId); setShowMobileSidebar(false); }}
-              className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${activeRoom === dm.roomId ? 'bg-amber-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] font-bold shrink-0 overflow-hidden">
-                  {dm.avatar ? <img src={dm.avatar} alt="" className="w-full h-full object-cover" /> : dm.name[0]}
-                </div>
-                <div className="min-w-0 text-left">
-                  <p className="text-sm font-bold truncate">{dm.name}</p>
-                </div>
-              </div>
-              {unreadCounts[dm.roomId] > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${activeRoom === dm.roomId ? 'bg-black text-amber-500' : 'bg-amber-500 text-black'}`}>
-                  {unreadCounts[dm.roomId]}
-                </span>
-              )}
-            </button>
-          ))}
-          
-          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mt-6">Groups</div>
-          <div className="space-y-1">
-            {joinedGroups
-              .filter(group => isOwner(user?.email) || !user?.campus || group.campus === user.campus)
-              .map(group => {
-                const gRoom = group.name.toLowerCase().replace(/\s+/g, '-');
-                return (
-                  <button 
-                    key={group.id}
-                    onClick={() => { setActiveRoom(gRoom); setShowMobileSidebar(false); }}
-                    className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${activeRoom === gRoom ? 'bg-amber-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-5 h-5 rounded bg-amber-500/20 flex items-center justify-center text-[10px] font-bold shrink-0">
-                        {group.logo_url ? <img src={group.logo_url} alt="" className="w-full h-full object-cover rounded" /> : group.name[0]}
-                      </div>
-                      <span className="text-sm font-bold truncate">{group.name}</span>
-                    </div>
-                    {unreadCounts[gRoom] > 0 && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${activeRoom === gRoom ? 'bg-black text-amber-500' : 'bg-amber-500 text-black'}`}>
-                        {unreadCounts[gRoom]}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-          </div>
-          
-          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mt-6">Campuses</div>
-          {CAMPUSES
-            .filter(c => isOwner(user?.email) || isVerified(user?.email) || !user?.campus || c.name === user.campus)
-            .map(c => (
-              <button 
-                key={c.slug}
-                onClick={() => { setActiveRoom(c.slug); setShowMobileSidebar(false); }}
-                className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${activeRoom === c.slug ? 'bg-amber-500 text-black' : 'text-gray-400 hover:bg-white/5'}`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-5 h-5 shrink-0"><CampusLogo slug={c.slug} /></div>
-                  <span className="text-sm font-bold truncate">{c.name}</span>
-                </div>
-                {unreadCounts[c.slug] > 0 && (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${activeRoom === c.slug ? 'bg-black text-amber-500' : 'bg-amber-500 text-black'}`}>
-                    {unreadCounts[c.slug]}
-                  </span>
-                )}
-              </button>
-            ))
-          }
-          {user?.campus && CAMPUSES.filter(c => c.name === user.campus).length === 0 && (
-             <div className="px-3 py-2 text-[10px] text-gray-600 italic">No matching campus found.</div>
-          )}
-        </div>
-      </div>
 
-      {/* Chat Area */}
-      <div className={`
-        flex-col h-full min-w-0 transition-all duration-300
-        ${showMobileSidebar ? 'hidden md:flex flex-1' : 'flex w-full'}
-      `}>
-        <div className="p-4 md:p-6 border-b border-white/5 flex justify-between items-center bg-black/40 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => setShowMobileSidebar(true)} className="md:hidden p-2 -ml-2 text-gray-400 hover:text-white">
-              <ChevronRight className="rotate-180" size={24} />
-            </button>
-            <div 
-              className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0 cursor-pointer"
-              onClick={() => {
-                if (activeRoom.startsWith('dm')) {
-                   const dmUser = directMessageList.find(d => d.roomId === activeRoom);
-                   if (dmUser) setSelectedProfileId(dmUser.id);
-                   else if (otherParticipantId) setSelectedProfileId(otherParticipantId);
-                }
-              }}
-            >
-              {activeRoom.startsWith('dm') ? (
-                 directMessageList.find(d => d.roomId === activeRoom)?.avatar ? 
-                 <img src={directMessageList.find(d => d.roomId === activeRoom)?.avatar} className="w-full h-full object-cover rounded-full" /> : 
-                 (directMessageList.find(d => d.roomId === activeRoom)?.name[0] || 'DM')
-              ) : activeRoom[0].toUpperCase()}
+            {/* Search Bar */}
+            <div className="relative group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" size={18} />
+              <input
+                type="text"
+                placeholder="Search Messenger"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full bg-white/5 border border-transparent focus:border-amber-500/30 rounded-full pl-11 pr-4 py-2.5 text-sm text-white focus:outline-none focus:bg-white/10 transition-all placeholder:text-gray-500"
+              />
+
+              {/* Search Results Dropdown */}
+              <AnimatePresence>
+                {searchResults.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute top-full left-0 right-0 mt-2 z-50 bg-[#1a1a1a] border border-white/10 rounded-2xl p-2 shadow-2xl max-h-[400px] overflow-y-auto"
+                  >
+                    <div className="px-2 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Users</div>
+                    {searchResults.map(u => (
+                      <button
+                        key={u.id}
+                        onClick={() => {
+                          const roomId = `dm-${Math.min(user!.id, u.id)}-${Math.max(user!.id, u.id)}`;
+                          setActiveRoom(roomId);
+                          addToDMList({ id: u.id, name: u.name, campus: u.campus, avatar: u.avatar });
+                          setSearchResults([]);
+                          setSearchQuery('');
+                          setShowMobileSidebar(false);
+                        }}
+                        className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 text-left transition-colors"
+                      >
+                        <div className="relative">
+                          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 font-bold overflow-hidden border border-white/5">
+                            {u.avatar ? <img src={u.avatar} alt="" className="w-full h-full object-cover" /> : u.name[0]}
+                          </div>
+                          {isUserOnline(u.id) && (
+                            <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-[#1a1a1a] rounded-full" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-white truncate">{u.name}</p>
+                          <p className="text-xs text-gray-500 truncate">{u.email || u.campus}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            <div className="min-w-0">
-              <h3 
-                className="font-bold text-white capitalize truncate cursor-pointer hover:text-amber-400"
+          </div>
+
+          {/* Chat List */}
+          <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1 scrollbar-hide">
+            {/* Active Users Horizontal (Optional - could be added here) */}
+
+            <div className="px-2 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-widest">Recent</div>
+
+            {/* AI Assistant Special Room */}
+            <button
+              onClick={() => { setActiveRoom('dm-ai-assistant'); setShowMobileSidebar(false); }}
+              className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${activeRoom === 'dm-ai-assistant' ? 'bg-amber-500/10 text-amber-500' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+              <div className="relative shrink-0">
+                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg border border-white/10">
+                  <Bot size={28} />
+                </div>
+                <span className="absolute bottom-1 right-1 w-3.5 h-3.5 bg-green-500 border-2 border-[#111] rounded-full" />
+              </div>
+              <div className="min-w-0 flex-1 text-left">
+                <div className="flex justify-between items-center mb-0.5">
+                  <p className="text-[15px] font-bold text-white truncate">JARVIS AI</p>
+                  <span className="text-[10px] text-gray-500">Active</span>
+                </div>
+                <p className="text-xs text-gray-500 truncate">Ask me about your assignments!</p>
+              </div>
+            </button>
+
+            {/* DM List */}
+            {directMessageList.map(dm => {
+              const isOnline = isUserOnline(dm.id);
+              const isActive = activeRoom === dm.roomId;
+              return (
+                <button
+                  key={dm.id}
+                  onClick={() => { setActiveRoom(dm.roomId); setShowMobileSidebar(false); }}
+                  className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all group ${isActive ? 'bg-amber-500/10' : 'hover:bg-white/5'}`}
+                >
+                  <div className="relative shrink-0">
+                    <div className="w-14 h-14 rounded-full bg-amber-500/20 flex items-center justify-center text-lg font-bold overflow-hidden border border-white/5">
+                      {dm.avatar ? <img src={dm.avatar} alt="" className="w-full h-full object-cover" /> : dm.name[0]}
+                    </div>
+                    {isOnline && (
+                      <span className="absolute bottom-1 right-1 w-3.5 h-3.5 bg-green-500 border-2 border-[#111] rounded-full" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className="flex justify-between items-baseline mb-0.5">
+                      <p className={`text-[15px] font-semibold truncate ${isActive ? 'text-amber-500' : 'text-white'}`}>{dm.name}</p>
+                      {unreadCounts[dm.roomId] > 0 && (
+                        <span className="w-3 h-3 bg-amber-500 rounded-full" />
+                      )}
+                    </div>
+                    <p className={`text-xs truncate ${unreadCounts[dm.roomId] > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                      {dm.lastMessage || 'Start a conversation'}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+
+            {/* Groups Section */}
+            {joinedGroups.length > 0 && (
+              <>
+                <div className="px-2 pt-4 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-widest">Groups</div>
+                {joinedGroups.map(group => {
+                  const gRoom = group.name.toLowerCase().replace(/\s+/g, '-');
+                  const isActive = activeRoom === gRoom;
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => { setActiveRoom(gRoom); setShowMobileSidebar(false); }}
+                      className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${isActive ? 'bg-amber-500/10' : 'hover:bg-white/5'}`}
+                    >
+                      <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center text-lg font-bold overflow-hidden border border-white/5 shrink-0">
+                        {group.logo_url ? <img src={group.logo_url} alt="" className="w-full h-full object-cover" /> : group.name[0]}
+                      </div>
+                      <div className="min-w-0 flex-1 text-left">
+                        <div className="flex justify-between items-baseline mb-0.5">
+                          <p className={`text-[15px] font-semibold truncate ${isActive ? 'text-amber-500' : 'text-white'}`}>{group.name}</p>
+                          {unreadCounts[gRoom] > 0 && (
+                            <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-black rounded-full">
+                              {unreadCounts[gRoom]}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 truncate">{group.description}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Chat Area (Facebook Style) */}
+        <div className={`
+          flex-col h-full min-w-0 transition-all duration-300 relative
+          ${showMobileSidebar ? 'hidden md:flex flex-1' : 'flex w-full'}
+        `}>
+          {/* Notification Center Popover */}
+          <AnimatePresence>
+            {showNotifications && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: -20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                className="absolute top-20 left-4 w-80 max-h-[500px] overflow-hidden bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl z-[100] flex flex-col"
+              >
+                <div className="p-4 border-b border-white/5 flex justify-between items-center bg-black/20">
+                  <h3 className="font-bold text-white">Notifications</h3>
+                  <button onClick={markNotificationsAsRead} className="text-xs text-amber-500 hover:text-amber-400 font-bold">Mark all as read</button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                  {notifications.length === 0 ? (
+                    <div className="py-8 text-center text-gray-500 text-sm">No notifications yet</div>
+                  ) : (
+                    notifications.map(n => (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          if (n.link) {
+                            const room = n.link.split('room=')[1];
+                            if (room) {
+                              setActiveRoom(room);
+                              setShowNotifications(false);
+                            }
+                          }
+                        }}
+                        className={`p-3 rounded-xl transition-all cursor-pointer ${n.is_read ? 'opacity-60 hover:opacity-100 hover:bg-white/5' : 'bg-amber-500/10 border border-amber-500/20'}`}
+                      >
+                        <p className="text-sm font-bold text-white mb-0.5">{n.title}</p>
+                        <p className="text-xs text-gray-400 line-clamp-2">{n.content}</p>
+                        <p className="text-[10px] text-gray-600 mt-2">{new Date(n.timestamp).toLocaleString()}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Chat Header */}
+          <div className="h-[72px] px-4 md:px-6 border-b border-white/5 flex justify-between items-center bg-[#111]/80 backdrop-blur-xl sticky top-0 z-10">
+            <div className="flex items-center gap-3 min-w-0">
+              <button onClick={() => setShowMobileSidebar(true)} className="md:hidden p-2 -ml-2 text-gray-400 hover:text-white">
+                <ChevronLeft size={24} />
+              </button>
+              <div
+                className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 font-bold shrink-0 cursor-pointer overflow-hidden border border-white/5"
                 onClick={() => {
+                  if (activeRoom === 'dm-ai-assistant') return;
                   if (activeRoom.startsWith('dm')) {
-                     const dmUser = directMessageList.find(d => d.roomId === activeRoom);
-                     if (dmUser) setSelectedProfileId(dmUser.id);
-                     else if (otherParticipantId) setSelectedProfileId(otherParticipantId);
+                    const dmUser = directMessageList.find(d => d.roomId === activeRoom);
+                    if (dmUser) setSelectedProfileId(dmUser.id);
+                    else if (otherParticipantId) setSelectedProfileId(otherParticipantId);
                   }
                 }}
               >
-                {activeRoom.startsWith('dm') ? 
-                  (directMessageList.find(d => d.roomId === activeRoom)?.name || activeRoom.replace(/-/g, ' ')) : 
-                  activeRoom.replace(/-/g, ' ')}
-              </h3>
-              <div className="flex items-center gap-2">
-                <p className="text-[10px] text-gray-500 truncate">
-                  {activeRoom.startsWith('dm') ? 'Direct Message' : ['global', 'announcements', 'help-desk'].includes(activeRoom) ? 'Channel' : 'Campus'}
-                </p>
-                {activeRoom.startsWith('dm') && (
-                  <p className={`text-[10px] flex items-center gap-1 ${isOtherOnline ? 'text-green-500' : 'text-gray-500'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${isOtherOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`} />
-                    {isOtherOnline ? 'Active now' : 'Offline'}
-                  </p>
-                )}
+                {activeRoom === 'dm-ai-assistant' ? (
+                   <Bot size={20} className="text-amber-500" />
+                ) : activeRoom.startsWith('dm') ? (
+                   directMessageList.find(d => d.roomId === activeRoom)?.avatar ?
+                   <img src={directMessageList.find(d => d.roomId === activeRoom)?.avatar} className="w-full h-full object-cover" /> :
+                   (directMessageList.find(d => d.roomId === activeRoom)?.name[0] || 'DM')
+                ) : activeRoom[0].toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <h3
+                  className="font-bold text-white capitalize truncate cursor-pointer hover:text-amber-400 text-sm md:text-base"
+                  onClick={() => {
+                    if (activeRoom === 'dm-ai-assistant') return;
+                    if (activeRoom.startsWith('dm')) {
+                       const dmUser = directMessageList.find(d => d.roomId === activeRoom);
+                       if (dmUser) setSelectedProfileId(dmUser.id);
+                       else if (otherParticipantId) setSelectedProfileId(otherParticipantId);
+                    }
+                  }}
+                >
+                  {activeRoom === 'dm-ai-assistant' ? 'JARVIS AI Assistant' : activeRoom.startsWith('dm') ?
+                    (directMessageList.find(d => d.roomId === activeRoom)?.name || activeRoom.replace(/-/g, ' ')) :
+                    activeRoom.replace(/-/g, ' ')}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {activeRoom === 'dm-ai-assistant' ? (
+                    <p className="text-[10px] text-green-500 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Always Active
+                    </p>
+                  ) : activeRoom.startsWith('dm') ? (
+                    <p className={`text-[10px] flex items-center gap-1 ${isOtherOnline ? 'text-green-500' : 'text-gray-500'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isOtherOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`} />
+                      {isOtherOnline ? 'Active now' : 'Offline'}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Group Channel</p>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1 md:gap-2 text-gray-500">
-            <button
-              onClick={() => setMutedRooms(prev => prev.includes(activeRoom) ? prev.filter(r => r !== activeRoom) : [...prev, activeRoom])}
-              className="p-2 rounded-lg hover:text-white hover:bg-white/5"
-            >
-              {mutedRooms.includes(activeRoom) ? <BellOff size={20} /> : <Bell size={20} />}
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setSettingsOpen(!settingsOpen)}
-                className="p-2 rounded-lg hover:text-white hover:bg-white/5"
-              >
-                <Settings size={20} />
-              </button>
-              {settingsOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-black/90 border border-white/10 shadow-2xl p-2 text-sm z-50">
-                  <button onClick={() => setCompactBubbles(v => !v)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5">
-                    {compactBubbles ? 'Disable compact bubbles' : 'Enable compact bubbles'}
-                  </button>
-                  <button onClick={() => setShowTimestamps(v => !v)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5">
-                    {showTimestamps ? 'Hide timestamps' : 'Show timestamps'}
-                  </button>
-                  <button onClick={clearChat} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5 text-rose-400">
-                    Clear for me
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
 
-        <div className="flex-1 flex overflow-hidden relative bg-[#0a0502]">
-          <div className="flex-1 flex flex-col min-w-0 h-full mx-auto max-w-5xl w-full border-x border-white/5 shadow-2xl">
-            {isInVoice && (
-              <div className="p-4 border-b border-white/5 bg-black/40">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/10">
-                    <video 
-                      ref={el => { if (el && localStreamRef.current) el.srcObject = localStreamRef.current; }} 
-                      autoPlay 
-                      muted 
-                      playsInline 
-                      className="w-full h-full object-cover" 
-                    />
-                    <div className="absolute bottom-2 left-2 text-[10px] font-bold bg-black/60 px-2 py-1 rounded-full flex items-center gap-2">
-                      {user?.name || 'Me'}
-                      {!micOn && <PhoneOff size={10} className="text-rose-500" />}
-                    </div>
-                  </div>
-                  {Array.from(remoteStreams.entries()).map(([id, stream]) => (
-                    <div key={id} className="relative aspect-video bg-black rounded-xl overflow-hidden border border-white/10">
-                      <video 
-                        ref={el => { if (el) el.srcObject = stream; }} 
-                        autoPlay 
-                        playsInline 
-                        className="w-full h-full object-cover" 
-                      />
-                      <div className="absolute bottom-2 left-2 text-[10px] font-bold bg-black/60 px-2 py-1 rounded-full">
-                        User {id}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="flex-1 p-4 md:px-6 md:py-6 overflow-hidden relative h-full">
+            <div className="flex items-center gap-1 md:gap-3 text-amber-500">
+              <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Phone size={20} /></button>
+              <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Video size={20} /></button>
+              <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Info size={20} /></button>
+            </div>
+          </div>
+
+          {/* Messages Area */}
+          <div className="flex-1 bg-[#090909] relative overflow-hidden flex flex-col">
+            <div className="flex-1 relative">
               {messages.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-center text-gray-500">
-                  <div>
-                    <MessageCircle className="mx-auto mb-3 opacity-70" />
-                    <p className="text-sm">No messages yet.</p>
+                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                  <div className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-6 border border-amber-500/20">
+                    <MessageCircle size={40} />
                   </div>
+                  <h4 className="text-xl font-bold text-white mb-2">Start a new story</h4>
+                  <p className="text-gray-500 text-sm max-w-[240px]">Say hello to {activeRoom === 'dm-ai-assistant' ? 'JARVIS' : 'your contact'} and start collaborating today.</p>
                 </div>
               ) : (
-                <>
-                  <Virtuoso
-                    ref={virtuosoRef}
-                    style={{ height: '100%' }}
-                    data={messages}
-                    firstItemIndex={firstItemIndex}
-                    initialTopMostItemIndex={messages.length - 1}
-                    computeItemKey={(index, item) => String((item as any).id ?? index)}
-                    followOutput="auto"
-                    alignToBottom={true} // Ensure initial load is at bottom
-                    components={{
-                      Scroller: forwardRef<HTMLDivElement, HTMLProps<HTMLDivElement>>((props, ref) => (
-                        <div {...props} ref={ref as any} className={`${props.className ?? ''} scrollbar-hide`} style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }} />
-                      )),
-                      Header: () => isLoadingMore ? <div className="py-3 text-center text-xs text-gray-500">Loading older messages…</div> : <div className="h-4" />
-                    }}
-                    startReached={async () => {
-                      if (isLoadingMore || !hasMore) return;
-                      
-                      const oldestMessage = messages[0];
-                      if (!oldestMessage) return;
-
-                      setIsLoadingMore(true);
-                      
-                      try {
-                        const beforeTimestamp = oldestMessage.timestamp;
-                        const response = await fetch(`/api/messages/${activeRoom}?userId=${user?.id}&before=${encodeURIComponent(beforeTimestamp)}`);
-                        const olderMessages: Message[] = await response.json();
-                        
-                        if (olderMessages && olderMessages.length > 0) {
-                          const newUnique = olderMessages.filter(nm => !messages.some(pm => pm.id === nm.id));
-                          
-                          if (newUnique.length > 0) {
-                            setFirstItemIndex(prev => prev - newUnique.length);
-                            setMessages(prev => [...newUnique, ...prev]);
-                          }
-                          
-                          setHasMore(olderMessages.length >= 50);
-                        } else {
-                          setHasMore(false);
+                <Virtuoso
+                  ref={virtuosoRef}
+                  style={{ height: '100%' }}
+                  data={messages}
+                  firstItemIndex={firstItemIndex}
+                  initialTopMostItemIndex={messages.length - 1}
+                  computeItemKey={(index, item) => String((item as any).id ?? index)}
+                  followOutput="auto"
+                  alignToBottom={true}
+                  components={{
+                    Scroller: forwardRef<HTMLDivElement, HTMLProps<HTMLDivElement>>((props, ref) => (
+                      <div {...props} ref={ref as any} className={`${props.className ?? ''} scrollbar-hide`} style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }} />
+                    )),
+                    Header: () => isLoadingMore ? <div className="py-6 text-center text-[10px] font-bold text-amber-500/50 uppercase tracking-[0.2em]">Syncing history…</div> : <div className="h-6" />
+                  }}
+                  startReached={async () => {
+                    if (isLoadingMore || !hasMore) return;
+                    const oldestMessage = messages[0];
+                    if (!oldestMessage) return;
+                    setIsLoadingMore(true);
+                    try {
+                      const response = await fetch(`/api/messages/${activeRoom}?userId=${user?.id}&before=${encodeURIComponent(oldestMessage.timestamp)}`);
+                      const olderMessages: Message[] = await response.json();
+                      if (olderMessages && olderMessages.length > 0) {
+                        const newUnique = olderMessages.filter(nm => !messages.some(pm => pm.id === nm.id));
+                        if (newUnique.length > 0) {
+                          setFirstItemIndex(prev => prev - newUnique.length);
+                          setMessages(prev => [...newUnique, ...prev]);
                         }
-                      } catch (error) {
-                        console.error("Failed to load older messages:", error);
-                      } finally {
-                        setIsLoadingMore(false);
+                        setHasMore(olderMessages.length >= 50);
+                      } else {
+                        setHasMore(false);
                       }
-                    }}
-                    itemContent={(index, m) => {
-                      const sid = (m as any).sender_id ?? (m as any).senderId;
-                      const sname = (m as any).sender_name ?? (m as any).senderName;
-                      const ts = (m as any).timestamp;
-                      const mUrl = (m as any).media_url ?? (m as any).mediaUrl;
-                      const mType = (m as any).media_type ?? (m as any).mediaType;
-                      const isMe = sid === user?.id;
-                      
-                      const prevMsg = messages[index - 1];
-                      const prevSid = prevMsg ? ((prevMsg as any).sender_id ?? (prevMsg as any).senderId) : null;
-                      const isChain = prevSid === sid;
-                      
-                      const nextMsg = messages[index + 1];
-                      const nextSid = nextMsg ? ((nextMsg as any).sender_id ?? (nextMsg as any).senderId) : null;
-                      const isLastInChain = nextSid !== sid;
+                    } catch (error) {
+                      console.error("Failed to load history:", error);
+                    } finally {
+                      setIsLoadingMore(false);
+                    }
+                  }}
+                  itemContent={(index, m) => {
+                    const sid = (m as any).sender_id ?? (m as any).senderId;
+                    const sname = (m as any).sender_name ?? (m as any).senderName;
+                    const ts = (m as any).timestamp;
+                    const mUrl = (m as any).media_url ?? (m as any).mediaUrl;
+                    const mType = (m as any).media_type ?? (m as any).mediaType;
+                    const isMe = sid === user?.id;
+                    const isAI = sid === 0;
 
-                      return (
-                        <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} ${isLastInChain ? 'mb-2' : 'mb-1'} px-4 md:px-6`}>
-                          <div 
-                            className={`flex flex-col max-w-[85%] md:max-w-[70%] ${isMe ? 'items-end' : 'items-start'} gap-1 relative min-w-0`}
-                            onContextMenu={(e) => {
-                              if (isMe) {
-                                e.preventDefault();
-                                if (confirm('Delete this message?')) deleteMessage(m.id);
-                              }
-                            }}
-                          >
-                            {!activeRoom.startsWith('dm') && !isChain && !isMe && (
-                              <span 
-                                className={`text-xs font-bold text-gray-400 mt-2 mb-0.5 flex items-center gap-1 cursor-pointer hover:text-amber-400 justify-start w-auto`}
-                                onClick={() => setSelectedProfileId(sid)}
-                              >
-                                {sname}
-                                {isVerified((m as any).sender_email || (m as any).senderEmail) && (
-                                  <span className="p-0.5 rounded-full bg-amber-500 text-black" title="Verified">
-                                    <ShieldCheck size={8} />
-                                  </span>
-                                )}
-                                {((m as any).sender_email === 'xandercamarin@gmail.com' || (m as any).senderEmail === 'xandercamarin@gmail.com') && (
-                                  <span className="p-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-white text-[8px] font-bold" title="Founder">
-                                    FOUNDER
-                                  </span>
-                                )}
-                              </span>
+                    const prevMsg = messages[index - 1];
+                    const prevSid = prevMsg ? ((prevMsg as any).sender_id ?? (prevMsg as any).senderId) : null;
+                    const isChain = prevSid === sid;
+
+                    const nextMsg = messages[index + 1];
+                    const nextSid = nextMsg ? ((nextMsg as any).sender_id ?? (nextMsg as any).senderId) : null;
+                    const isLastInChain = nextSid !== sid;
+
+                    return (
+                      <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} ${isLastInChain ? 'mb-4' : 'mb-0.5'} px-4 md:px-6`}>
+                        <div className={`flex items-end gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                          {!isMe && isLastInChain && (
+                            <div
+                              className="w-8 h-8 rounded-full shrink-0 overflow-hidden bg-amber-500/10 flex items-center justify-center text-[10px] font-bold text-amber-500 border border-white/5 cursor-pointer"
+                              onClick={() => !isAI && setSelectedProfileId(sid)}
+                            >
+                              {isAI ? <Bot size={16} /> : (m as any).sender_avatar ? <img src={(m as any).sender_avatar} className="w-full h-full object-cover" /> : sname[0]}
+                            </div>
+                          )}
+                          {!isMe && !isLastInChain && <div className="w-8 shrink-0" />}
+
+                          <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                            {((!activeRoom.startsWith('dm') && !isChain && !isMe) || isAI && !isChain) && (
+                              <span className="text-[10px] font-bold text-gray-500 mb-1 ml-1">{sname}</span>
                             )}
                             <div className={`
-                              ${compactBubbles ? 'px-3 py-1.5' : 'px-4 py-2'} 
-                              text-sm break-words whitespace-pre-wrap [overflow-wrap:anywhere] shadow-sm max-w-full
-                              ${isMe 
-                                ? `bg-amber-500 text-black ${isChain ? 'rounded-tr-md' : 'rounded-tr-2xl'} ${isLastInChain ? 'rounded-br-2xl' : 'rounded-br-md'} rounded-l-2xl` 
-                                : `bg-white/10 text-white ${isChain ? 'rounded-tl-md' : 'rounded-tl-2xl'} ${isLastInChain ? 'rounded-bl-2xl' : 'rounded-bl-md'} rounded-r-2xl`}
+                              relative group px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap [overflow-wrap:anywhere] transition-all
+                              ${isMe
+                                ? `bg-amber-500 text-black shadow-lg shadow-amber-500/10 ${isChain ? 'rounded-r-md' : 'rounded-tr-2xl'} ${isLastInChain ? 'rounded-br-2xl' : 'rounded-br-md'} rounded-l-2xl`
+                                : isAI
+                                  ? `bg-indigo-600 text-white shadow-lg shadow-indigo-600/10 ${isChain ? 'rounded-l-md' : 'rounded-tl-2xl'} ${isLastInChain ? 'rounded-bl-2xl' : 'rounded-bl-md'} rounded-r-2xl`
+                                  : `bg-[#222] text-white ${isChain ? 'rounded-l-md' : 'rounded-tl-2xl'} ${isLastInChain ? 'rounded-bl-2xl' : 'rounded-bl-md'} rounded-r-2xl`}
                             `}>
                               {(m as any).content}
                               {mUrl && (
-                                <div className="mt-2 rounded-lg overflow-hidden border border-white/10 max-w-full">
+                                <div className="mt-2 rounded-xl overflow-hidden border border-white/10 max-w-full bg-black/20">
                                   {mType?.startsWith('video') ? <video src={mUrl} controls className="w-full" /> : <img src={mUrl} alt="" className="w-full object-cover" />}
                                 </div>
                               )}
-                              {renderLinkPreview((m as any).content)}
-                            </div>
-                            {showTimestamps && isLastInChain && (
-                              <span className={`text-[9px] text-gray-500 px-1 ${isMe ? 'text-right' : 'text-left'} w-full flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                {new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                              </span>
-                            )}
-                            <div className={`mt-1 flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'} flex-wrap`}>
-                              {['👍', '❤️', '🔥'].map((emoji) => (
-                                <button
-                                  key={`${m.id}-${emoji}`}
-                                  onClick={() => reactToMessage(m.id, emoji)}
-                                  className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${m.user_reaction === emoji ? 'bg-amber-400/90 text-black border-amber-300' : 'bg-white/5 text-gray-300 border-white/10 hover:border-amber-400/50'}`}
-                                  type="button"
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
+
+                              {/* Reactions display */}
                               {(m.reaction_count ?? 0) > 0 && (
-                                <span className="text-[10px] text-amber-300 px-2">{m.user_reaction || '💬'} {(m.reaction_count ?? 0)}</span>
+                                <div className={`absolute -bottom-2 ${isMe ? 'right-0' : 'left-0'} flex -space-x-1`}>
+                                  <div className="bg-[#333] border border-white/10 rounded-full px-1.5 py-0.5 flex items-center gap-1 shadow-xl">
+                                    <span className="text-[10px]">{m.user_reaction || '❤️'}</span>
+                                    <span className="text-[9px] font-bold text-gray-300">{m.reaction_count}</span>
+                                  </div>
+                                </div>
                               )}
                             </div>
+
+                            {isLastInChain && showTimestamps && (
+                              <div className={`mt-1 text-[9px] text-gray-600 flex items-center gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                {new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                {isMe && (
+                                  <span className="text-amber-500/50">
+                                    <Check size={8} />
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      );
-                    }}
-                    atBottomStateChange={(isAtBottom) => {
-                      stickToBottomRef.current = isAtBottom;
-                      if (isAtBottom) sendSeen();
-                    }}
-                  />
-                  {typingUsers[activeRoom]?.length > 0 && (
-                    <div className="absolute bottom-4 left-6 flex items-center gap-2 text-[10px] text-amber-500 font-bold bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-amber-500/20 shadow-lg animate-in fade-in slide-in-from-bottom-2">
-                      <div className="flex gap-1">
-                        <span className="w-1 h-1 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                        <span className="w-1 h-1 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                        <span className="w-1 h-1 bg-amber-500 rounded-full animate-bounce" />
                       </div>
-                      {typingUsers[activeRoom].join(', ')} {typingUsers[activeRoom].length > 1 ? 'are' : 'is'} {activeRoom === 'dm-ai-assistant' ? 'compiling response...' : 'typing...'}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="p-4 md:p-6 bg-black/40 border-t border-white/5">
-              {(activeRoom === 'announcements' && !isOwner(user?.email)) ? (
-                <div className="flex justify-center items-center py-3 bg-white/5 rounded-2xl border border-white/10 text-gray-500 text-sm">
-                  <ShieldCheck size={16} className="mr-2 text-amber-500/50" />
-                  This channel is read-only. Only MSU Admins can post.
-                </div>
-              ) : (
-                <form 
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!user) return; // Guard clause
-                    const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement;
-                    if (input.value.trim()) {
-                      const msgContent = input.value;
-                      // Clear immediately to prevent double send
-                      input.value = '';
-                      setIsTypingLocal(false);
-                      
-                      // Send
-                      sendMessage(msgContent);
-                      
-                      if (socketRef.current) {
-                        socketRef.current.send(JSON.stringify({
-                          type: 'typing',
-                          senderId: user.id,
-                          senderName: user.name,
-                          roomId: activeRoom,
-                          isTyping: false
-                        }));
-                      }
-                    }
+                    );
                   }}
-                  className="flex w-full items-center gap-2"
-                >
-                  <input 
+                  atBottomStateChange={(isAtBottom) => {
+                    stickToBottomRef.current = isAtBottom;
+                    if (isAtBottom) sendSeen();
+                  }}
+                />
+              )}
+
+              {/* Typing Indicator */}
+              <AnimatePresence>
+                {typingUsers[activeRoom]?.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute bottom-4 left-6 flex items-center gap-3 bg-[#1a1a1a]/95 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-2xl z-20"
+                  >
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" />
+                    </div>
+                    <span className="text-[11px] font-bold text-gray-300">
+                      {typingUsers[activeRoom].length > 2 ? 'Several people' : typingUsers[activeRoom].join(', ')} is typing...
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Input Bar */}
+            <div className="p-4 md:p-6 bg-[#111]/80 backdrop-blur-xl border-t border-white/5">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!user) return;
+                  const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement;
+                  if (input.value.trim()) {
+                    const msgContent = input.value;
+                    input.value = '';
+                    setIsTypingLocal(false);
+                    sendMessage(msgContent);
+                    if (socketRef.current) {
+                      socketRef.current.send(JSON.stringify({
+                        type: 'typing',
+                        senderId: user.id,
+                        senderName: user.name,
+                        roomId: activeRoom,
+                        isTyping: false
+                      }));
+                    }
+                  }
+                }}
+                className="flex items-center gap-2 md:gap-4 max-w-5xl mx-auto w-full"
+              >
+                <div className="flex items-center gap-1 md:gap-2">
+                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Plus size={20} /></button>
+                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Image size={20} /></button>
+                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all hidden md:block"><Mic size={20} /></button>
+                </div>
+
+                <div className="flex-1 relative">
+                  <input
                     name="message"
                     type="text"
-                    placeholder="Type a message…"
+                    placeholder="Aa"
                     autoComplete="off"
                     onChange={handleTyping}
-                    onKeyDown={(e) => {
-                       if (e.key === 'Enter' && !e.shiftKey) {
-                         e.preventDefault();
-                         // Manually trigger the submit handler since requestSubmit() can be flaky in some contexts
-                         const form = e.currentTarget.form;
-                         if (form) {
-                           form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                         }
-                       }
-                    }}
-                    className="min-w-0 flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                    className="w-full bg-white/5 border border-transparent focus:border-amber-500/30 rounded-2xl px-5 py-2.5 text-[15px] text-white focus:outline-none transition-all"
                   />
-                  <button 
-                    type="submit"
-                    disabled={isSending}
-                    className={`p-3 rounded-2xl bg-amber-500 text-black hover:bg-amber-400 transition-colors shrink-0 flex items-center justify-center ${isSending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {isSending ? <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" /> : <Send size={18} />}
-                  </button>
-                </form>
-              )}
+                  <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 hover:scale-110 transition-transform"><Smile size={20} /></button>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSending}
+                  className={`p-3 rounded-full bg-amber-500 text-black hover:bg-amber-400 transition-all shrink-0 flex items-center justify-center shadow-lg shadow-amber-500/20 active:scale-95 ${isSending ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isSending ? <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" /> : <Send size={20} />}
+                </button>
+              </form>
             </div>
           </div>
-          
         </div>
-      </div>
 
-      {/* Profile Detail Overlay */}
-      <AnimatePresence>
-        {selectedProfileId && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-            <ProfileDetail id={selectedProfileId} onClose={() => setSelectedProfileId(null)} />
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
+        {/* Profile Detail Overlay */}
+        <AnimatePresence>
+          {selectedProfileId && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
+              <ProfileDetail id={selectedProfileId} onClose={() => setSelectedProfileId(null)} />
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
     );
   };
 
