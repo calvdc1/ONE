@@ -477,7 +477,8 @@ async function startServer() {
     const roomId = req.params.roomId;
     const userId = Number(req.query.userId);
     const before = req.query.before as string | undefined;
-    const pageSize = 50;
+    const limit = Math.min(Number(req.query.limit) || 50, 500); // Use limit from query, default to 50, max 500
+    const pageSize = Math.max(limit, 1);
 
     let rows: any[] = [];
     const queryBase = `

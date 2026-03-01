@@ -814,6 +814,15 @@ export default function App() {
   const [cameraOn, setCameraOn] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Map<number, MediaStream>>(new Map());
 
+  // File and media upload states
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedEmoji, setSelectedEmoji] = useState('');
+
   const normalizeIncoming = (raw: any) => {
     // Accept both server styles: roomId vs room_id, senderId vs sender_id, etc.
     const roomId = raw.roomId ?? raw.room_id ?? raw.room ?? '';
@@ -1197,12 +1206,12 @@ export default function App() {
       setFirstItemIndex(START_INDEX);
       setIsLoadingMore(true);
 
-      const url = `/api/messages/${activeRoom}?userId=${user?.id || ''}&limit=6`;
+      const url = `/api/messages/${activeRoom}?userId=${user?.id || ''}&limit=50`;
       fetch(url)
         .then(res => res.json())
         .then((data: Message[]) => {
           setMessages(data);
-          setHasMore(data.length >= 6);
+          setHasMore(data.length >= 50);
           // On room change, scroll to bottom
           requestAnimationFrame(() => {
             if (virtuosoRef.current) {
@@ -1482,6 +1491,79 @@ export default function App() {
     } finally {
         setIsSending(false);
     }
+  };
+
+  // File upload handler
+  const handleFileUpload = async (file: File) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      const mimeType = file.type;
+      await sendMessage('📎 ' + file.name, dataUrl, mimeType);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Image upload handler
+  const handleImageUpload = async (file: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      await sendMessage('🖼️ Photo', dataUrl, 'image/jpeg');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Voice recording handler
+  const handleStartVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      voiceRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        voiceChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const dataUrl = e.target?.result as string;
+          await sendMessage('🎙️ Voice message', dataUrl, 'audio/webm');
+        };
+        reader.readAsDataURL(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Voice recording error:', error);
+      alert('Unable to access microphone. Please check permissions.');
+    }
+  };
+
+  const handleStopVoiceRecording = () => {
+    if (voiceRecorderRef.current && isRecording) {
+      voiceRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // Emoji handler
+  const handleEmojiSelect = (emoji: string) => {
+    const input = document.querySelector('input[name="message"]') as HTMLInputElement;
+    if (input) {
+      input.value += emoji;
+      input.focus();
+    }
+    setShowEmojiPicker(false);
   };
 
   const createPeerConnection = async (targetId: number, initiator: boolean) => {
@@ -4572,6 +4654,9 @@ export default function App() {
               <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Phone size={20} /></button>
               <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Video size={20} /></button>
               <button className="p-2 rounded-full hover:bg-white/5 transition-all"><Info size={20} /></button>
+              <button onClick={() => setView('dashboard')} className="p-2 rounded-full hover:bg-white/5 transition-all text-gray-400 hover:text-white ml-2" title="Exit Messenger">
+                <X size={20} />
+              </button>
             </div>
           </div>
 
@@ -4756,10 +4841,13 @@ export default function App() {
                 className="flex items-center gap-2 md:gap-4 max-w-5xl mx-auto w-full"
               >
                 <div className="flex items-center gap-1 md:gap-2">
-                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Plus size={20} /></button>
-                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Image size={20} /></button>
-                  <button type="button" className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all hidden md:block"><Mic size={20} /></button>
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Plus size={20} /></button>
+                  <button type="button" onClick={() => imageInputRef.current?.click()} className="p-2.5 rounded-full text-amber-500 hover:bg-amber-500/10 transition-all"><Image size={20} /></button>
+                  <button type="button" onClick={isRecording ? handleStopVoiceRecording : handleStartVoiceRecording} className={`p-2.5 rounded-full transition-all hidden md:block ${isRecording ? 'bg-rose-500/20 text-rose-500 animate-pulse' : 'text-amber-500 hover:bg-amber-500/10'}`}><Mic size={20} /></button>
                 </div>
+
+                <input ref={fileInputRef} type="file" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} className="hidden" />
+                <input ref={imageInputRef} type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0])} className="hidden" />
 
                 <div className="flex-1 relative">
                   <input
@@ -4770,7 +4858,22 @@ export default function App() {
                     onChange={handleTyping}
                     className="w-full bg-white/5 border border-transparent focus:border-amber-500/30 rounded-2xl px-5 py-2.5 text-[15px] text-white focus:outline-none transition-all"
                   />
-                  <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 hover:scale-110 transition-transform"><Smile size={20} /></button>
+                  <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 hover:scale-110 transition-transform"><Smile size={20} /></button>
+
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-[#222] border border-white/10 rounded-2xl p-3 z-50 grid grid-cols-6 gap-2 w-64 shadow-2xl">
+                      {['😀', '😂', '❤️', '🔥', '👍', '😍', '😢', '😱', '🎉', '🎊', '🚀', '💯', '👏', '🙏', '✨', '💪', '😎', '🤔', '😴', '😜', '🤗', '😴', '🤐', '😑', '😒', '😕', '😞', '😔', '😌', '😖', '😤', '🤨', '😨', '😰', '😧', '😦', '😮', '🤐', '😲', '😳', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴'].map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleEmojiSelect(emoji)}
+                          className="text-2xl hover:scale-125 transition-transform p-1 rounded hover:bg-white/10"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <button
