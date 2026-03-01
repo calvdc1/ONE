@@ -1086,33 +1086,27 @@ export default function App() {
         if (data.type === 'chat') {
           const msg = normalizeIncoming(data);
 
-          // If server echoes our optimistic message, remove the optimistic one by clientId
-          if (msg.clientId && pendingClientIds.current.has(String(msg.clientId))) {
-            pendingClientIds.current.delete(String(msg.clientId));
-            setMessages(prev => prev.filter(m => (m as any).clientId !== msg.clientId));
-          } else if (msg.sender_id === user.id && !msg.clientId) {
-             setMessages(prev => {
-                const lastMsg = prev[prev.length - 1];
-                if (lastMsg && (lastMsg as any).clientId && lastMsg.content === msg.content && lastMsg.sender_id === msg.sender_id) {
-                   return [...prev.slice(0, -1), msg];
-                }
-                return prev;
-             });
-          }
-
           const msgId = String(msg.id);
-
           const currentView = viewRef.current;
           const currentRoom = activeRoomRef.current;
           const isInCorrectView = (currentView === 'messenger' || currentView === 'newsfeed' || currentView === 'explorer');
           const isCurrentRoom = (msg.roomId === currentRoom);
 
+          // Handle message in current room
           if (isCurrentRoom && isInCorrectView) {
             setMessages(prev => {
+              // If this is a server echo of our optimistic message, replace the optimistic with the server version
+              if (msg.clientId && pendingClientIds.current.has(String(msg.clientId))) {
+                pendingClientIds.current.delete(String(msg.clientId));
+                return prev.map(m => (m as any).clientId === msg.clientId ? msg : m);
+              }
+
+              // Avoid duplicates
               if (prev.some(m => String((m as any).id) === msgId || ((m as any).clientId && (m as any).clientId === msg.clientId))) return prev;
               return [...prev, msg];
             });
           } else {
+            // Message is for a different room - mark as unread and toast
             setUnreadCounts(prev => ({
               ...prev,
               [msg.roomId]: (prev[msg.roomId] || 0) + 1
@@ -1877,7 +1871,7 @@ export default function App() {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-sm font-medium"
           >
             <LogOut size={20} />
             <span>Sign Out</span>
@@ -3392,7 +3386,7 @@ export default function App() {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors text-sm font-medium"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-sm font-medium"
           >
             <LogOut size={18} />
             <span>Sign Out</span>
@@ -3442,7 +3436,7 @@ export default function App() {
                           >
                             Upload new picture
                           </button>
-                          <button className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium text-gray-400 hover:text-red-400 transition-colors">
+                          <button className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium text-gray-400 hover:text-rose-400 transition-colors">
                             Delete
                           </button>
                         </div>
@@ -4582,8 +4576,8 @@ export default function App() {
           </div>
 
           {/* Messages Area */}
-          <div className="flex-1 bg-[#090909] relative overflow-hidden flex flex-col">
-            <div className="flex-1 relative">
+          <div className="flex-1 bg-[#090909] relative flex flex-col min-h-0">
+            <div className="flex-1 relative overflow-hidden">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8">
                   <div className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-6 border border-amber-500/20">
