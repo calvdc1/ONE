@@ -8,13 +8,14 @@ import { useState, useEffect, useMemo, FormEvent, useRef, forwardRef } from 'rea
 import type { HTMLProps } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  MapPin, 
+import {
+  MapPin,
   ChevronRight,
   Users,
   Globe,
   BookOpen,
   ShieldCheck,
+  Shield,
   Menu,
   X,
   ArrowRight,
@@ -795,6 +796,8 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'account' | 'profile' | 'privacy' | 'id'>('account');
   const [newPostContent, setNewPostContent] = useState('');
   const [postImage, setPostImage] = useState<string | null>(null);
+  const [updateText, setUpdateText] = useState('');
+  const [postingUpdate, setPostingUpdate] = useState(false);
   const [postingPost, setPostingPost] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<number>>(new Set());
   const [userPreferences, setUserPreferences] = useState({
@@ -1951,13 +1954,49 @@ export default function App() {
             ))}
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-400 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-sm font-medium"
-          >
-            <LogOut size={20} />
-            <span>Sign Out</span>
-          </button>
+          {user?.email === 'xandercamarin@gmail.com' && (
+            <div className="mt-8 pt-6 px-3 border-t border-amber-500/20 space-y-2">
+              <div className="flex items-center gap-2 mb-4 px-1">
+                <Shield size={16} className="text-amber-500" />
+                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">Admin Controls</span>
+              </div>
+              <button
+                onClick={() => {
+                  const res = confirm('Are you sure? This action cannot be undone.');
+                  if (res) {
+                    setFreedomPosts([]);
+                    alert('All posts cleared');
+                  }
+                }}
+                className="w-full text-left px-3 py-2 rounded-lg text-rose-400 text-xs hover:bg-rose-500/10 transition-colors"
+              >
+                Delete All Posts
+              </button>
+              <button
+                onClick={() => {
+                  const res = confirm('Reset all user data?');
+                  if (res) {
+                    alert('Data reset function available');
+                  }
+                }}
+                className="w-full text-left px-3 py-2 rounded-lg text-rose-400 text-xs hover:bg-rose-500/10 transition-colors"
+              >
+                Reset User Data
+              </button>
+              <button
+                onClick={() => alert('Moderation dashboard coming soon')}
+                className="w-full text-left px-3 py-2 rounded-lg text-amber-400 text-xs hover:bg-amber-500/10 transition-colors"
+              >
+                Moderation Tools
+              </button>
+              <button
+                onClick={() => alert('Settings available')}
+                className="w-full text-left px-3 py-2 rounded-lg text-amber-400 text-xs hover:bg-amber-500/10 transition-colors"
+              >
+                System Settings
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Main Feed */}
@@ -2057,7 +2096,7 @@ export default function App() {
 
             {/* Posts Feed */}
             <div className="space-y-6">
-              {freedomPosts.slice(0, 8).map((post) => (
+              {freedomPosts.filter(post => post.type !== 'confession').slice(0, 8).map((post) => (
                 <div key={post.id} className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden hover:border-amber-500/30 transition">
                   {/* Post Header */}
                   <div className="p-4 flex items-center justify-between border-b border-white/10">
@@ -2070,7 +2109,48 @@ export default function App() {
                         <div className="text-xs text-gray-500">{post.campus} • {new Date(post.timestamp).toLocaleDateString()}</div>
                       </div>
                     </div>
-                    <MoreHorizontal size={16} className="text-gray-500" />
+                    {(user?.id === post.user_id || user?.email === 'xandercamarin@gmail.com') && (
+                      <div className="relative group">
+                        <button className="p-2 rounded-full hover:bg-white/10 transition text-gray-500 hover:text-gray-300">
+                          <MoreHorizontal size={16} />
+                        </button>
+                        <div className="absolute right-0 top-full mt-1 w-32 bg-[#1a1310] border border-white/10 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Delete this post?')) return;
+                              try {
+                                const response = await fetch(`/api/freedomwall/${post.id}`, {
+                                  method: 'DELETE',
+                                  headers: { 'Content-Type': 'application/json' }
+                                });
+                                if (response.ok) {
+                                  setFreedomPosts(prev => prev.filter(p => p.id !== post.id));
+                                } else {
+                                  const text = await response.text();
+                                  if (text) {
+                                    const res = JSON.parse(text);
+                                    if (res.success) {
+                                      setFreedomPosts(prev => prev.filter(p => p.id !== post.id));
+                                    } else {
+                                      alert('Failed to delete post');
+                                    }
+                                  } else {
+                                    // Empty response but request was processed
+                                    setFreedomPosts(prev => prev.filter(p => p.id !== post.id));
+                                  }
+                                }
+                              } catch (err) {
+                                console.error('Delete failed', err);
+                                alert('Error deleting post');
+                              }
+                            }}
+                            className="w-full text-left px-4 py-2 text-sm text-rose-400 hover:bg-rose-500/10 rounded-lg transition first:rounded-t-lg last:rounded-b-lg"
+                          >
+                            Delete Post
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Post Content */}
@@ -3133,22 +3213,75 @@ export default function App() {
     </div>
   );
 
-  const renderNewsfeed = () => (
-    <div className="min-h-screen bg-[#0a0502] text-gray-200 p-6 md:p-12">
-      <div className="max-w-4xl mx-auto">
-        <header className="flex justify-between items-center mb-8">
-          <h2 className="text-3xl font-bold text-metallic-gold">Latest Update</h2>
-          <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-white"><X /></button>
-        </header>
-        <div className="space-y-6">
-          <div className="p-6 rounded-3xl bg-white/5 border border-white/10">
-            <h4 className="font-bold mb-4 flex items-center gap-2"><MessageSquare size={18} className="text-amber-500" /> Announcements</h4>
-            <Feed room="announcements" />
+  const renderNewsfeed = () => {
+    const isAuthorized = user?.email === 'xandercamarin@gmail.com';
+
+    return (
+      <div className="min-h-screen bg-[#0a0502] text-gray-200 p-6 md:p-12">
+        <div className="max-w-4xl mx-auto">
+          <header className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl font-bold text-metallic-gold">Latest Update</h2>
+            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-white"><X /></button>
+          </header>
+          <div className="space-y-6">
+            {isAuthorized && (
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
+                    {user?.name?.[0] || 'U'}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Post an Update</h3>
+                    <p className="text-xs text-gray-500">Notify everyone in the community</p>
+                  </div>
+                </div>
+                <textarea
+                  value={updateText}
+                  onChange={(e) => setUpdateText(e.target.value)}
+                  placeholder="What's new?"
+                  rows={3}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500/50 transition-all resize-none mb-4"
+                />
+                <div className="flex justify-end">
+                  <button
+                    onClick={async () => {
+                      if (!user || !updateText.trim()) return;
+                      setPostingUpdate(true);
+                      try {
+                        const res = await fetch('/api/messages/announcements', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            content: updateText.trim(),
+                            sender_name: 'ONEMSU Updates',
+                            userId: user.id
+                          })
+                        }).then(r => r.json());
+                        if (res.success) {
+                          setUpdateText('');
+                          window.location.reload();
+                        }
+                      } finally {
+                        setPostingUpdate(false);
+                      }
+                    }}
+                    disabled={!updateText.trim() || postingUpdate}
+                    className="px-6 py-2 rounded-lg btn-red-metallic font-bold disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {postingUpdate ? 'Posting...' : 'Post Update'}
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="p-6 rounded-3xl bg-white/5 border border-white/10">
+              <h4 className="font-bold mb-4 flex items-center gap-2"><MessageSquare size={18} className="text-amber-500" /> Announcements</h4>
+              <Feed room="announcements" />
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const Feed = ({ room }: { room: string }) => {
     const [items, setItems] = useState<Message[]>([]);
@@ -4186,7 +4319,7 @@ export default function App() {
                 const res = await fetch('/api/freedomwall', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ userId: user.id, alias: confessionAlias || 'ONEMSU', content: freedomText.trim(), campus: user.campus || 'Global', imageUrl })
+                  body: JSON.stringify({ userId: user.id, alias: confessionAlias || 'ONEMSU', content: freedomText.trim(), campus: user.campus || 'Global', imageUrl, type: 'confession' })
                 }).then(r => r.json());
                 if (res.success) {
                   setFreedomText('');
