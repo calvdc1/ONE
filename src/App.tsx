@@ -4547,7 +4547,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute top-full left-0 right-0 mt-2 z-50 bg-[#1a1a1a] border border-white/10 rounded-2xl p-2 shadow-2xl max-h-[400px] overflow-y-auto"
+                    className="absolute top-full left-0 right-0 mt-2 z-50 bg-[#1a1a1a] border border-white/10 rounded-2xl p-2 shadow-2xl max-h-[400px] overflow-y-auto scrollbar-subtle"
                   >
                     <div className="px-2 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Users</div>
                     {searchResults.map(u => (
@@ -4584,7 +4584,7 @@ export default function App() {
           </div>
 
           {/* Chat List */}
-          <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1 scrollbar-hide">
+          <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1 scrollbar-subtle">
             {/* Active Users Horizontal (Optional - could be added here) */}
 
             <div className="px-2 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-widest">Recent</div>
@@ -4816,7 +4816,7 @@ export default function App() {
                   alignToBottom={true}
                   components={{
                     Scroller: forwardRef<HTMLDivElement, HTMLProps<HTMLDivElement>>((props, ref) => (
-                      <div {...props} ref={ref as any} className={`${props.className ?? ''} scrollbar-hide`} style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }} />
+                      <div {...props} ref={ref as any} className={`${props.className ?? ''} scrollbar-subtle`} style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }} />
                     )),
                     Header: () => isLoadingMore ? <div className="py-6 text-center text-[10px] font-bold text-amber-500/50 uppercase tracking-[0.2em]">Syncing history…</div> : <div className="h-6" />
                   }}
