@@ -4812,13 +4812,16 @@ export default function App() {
                   firstItemIndex={firstItemIndex}
                   initialTopMostItemIndex={messages.length - 1}
                   computeItemKey={(index, item) => String((item as any).id ?? index)}
-                  followOutput="auto"
+                  followOutput={(isAtBottom) => isAtBottom ? 'smooth' : false}
                   alignToBottom={true}
+                  overscan={10}
+                  increaseViewportBy={{ top: 100, bottom: 100 }}
                   components={{
                     Scroller: forwardRef<HTMLDivElement, HTMLProps<HTMLDivElement>>((props, ref) => (
                       <div {...props} ref={ref as any} className={`${props.className ?? ''} scrollbar-subtle`} style={{ overflowY: 'auto', overflowX: 'hidden', height: '100%' }} />
                     )),
-                    Header: () => isLoadingMore ? <div className="py-6 text-center text-[10px] font-bold text-amber-500/50 uppercase tracking-[0.2em]">Syncing history…</div> : <div className="h-6" />
+                    Header: () => isLoadingMore ? <div className="py-6 text-center text-[10px] font-bold text-amber-500/50 uppercase tracking-[0.2em]">Syncing history…</div> : <div className="h-6" />,
+                    Footer: () => typingUsers[activeRoom]?.length > 0 ? <div className="h-12" /> : null
                   }}
                   startReached={async () => {
                     if (isLoadingMore || !hasMore) return;
